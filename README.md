@@ -1,43 +1,33 @@
-# KoeWi Bierlogger PWA (mit Login)
+# KoeWi Bierlogger PWA
 
-Progressive Web App als grafisches Frontend fuer euer Google Apps Script Backend.
-Jede Person meldet sich einmalig mit Name + selbst gewaehltem Passwort an;
-danach bleibt sie auf ihrem Handy eingeloggt (Session wird lokal gespeichert).
+Komplettes, lauffaehiges Paket: True-Black-Design, Login (Name+Passwort),
+Offline-Faehigkeit, Mengen-Stepper (1-19 Flaschen, 1-5 Kaesten) und euer
+echtes Zirkel-Logo als App-Icon.
 
-## Wie das Login funktioniert
+## Setup (Reihenfolge wichtig)
 
-1. Beim ALLERERSTEN Login tippt die Person ihren Namen und ein selbst
-   gewaehltes Passwort (min. 4 Zeichen) ein.
-2. Das Script prueft: Name noch nie gesehen? -> Passwort wird jetzt fest
-   als Hash im neuen Sheet "Zugangsdaten" hinterlegt. Login gilt sofort.
-3. Bei jedem weiteren Login auf DIESEM Geraet: automatisch, da Name+Passwort
-   im Browser (localStorage) gespeichert bleiben -- keine erneute Eingabe.
-4. Bei einem NEUEN Geraet: einmal Name + das schon vergebene Passwort
-   eingeben, dann pruefts der Server gegen den gespeicherten Hash.
-5. Passwoerter werden NIE im Klartext gespeichert, nur als SHA-256 Hash
-   im Sheet "Zugangsdaten".
+1. In app.js ganz oben SCRIPT_URL auf eure Apps-Script-Web-App-URL setzen.
+2. login-backend-addon.gs und stand-backend-addon.gs Inhalte in euer
+   bestehendes Apps-Script-Projekt einbauen (Anleitung steht in den Dateien),
+   dann neu deployen.
+3. Kompletten Ordnerinhalt auf GitHub Pages / Netlify / Firebase Hosting
+   hochladen (HTTPS zwingend erforderlich fuer Service Worker).
+4. Auf dem Handy: Seite oeffnen, falls vorher schon mal besucht einmal
+   Website-Daten/Cache loeschen, dann "Zum Startbildschirm hinzufuegen"
+   bzw. "App installieren".
 
-## Setup (4 Schritte)
+## Warum vorher Icons/Installation/Offline nicht gingen
 
-1. `login-backend-addon.gs` Inhalt in euer bestehendes Apps-Script-Projekt
-   kopieren (neue Datei anlegen oder unten anhaengen).
-2. In eurer `doGet(e)`-Funktion direkt nach der Key-Pruefung den Login-Block
-   einfuegen (Code-Kommentar in der .gs-Datei zeigt genau wo).
-3. In `app.js` die Variable `SCRIPT_URL` auf eure Web-App-URL setzen.
-4. Icons in `icons/icon-192.png` und `icons/icon-512.png` ablegen, dann den
-   Ordner auf GitHub Pages / Netlify / Firebase Hosting hochladen (HTTPS!).
+- Icons waren nur Platzhalter bzw. das SVG hatte keine Fuellfarbe gesetzt
+  und wurde dadurch auf schwarzem Hintergrund unsichtbar gerendert.
+- Ohne gueltige Icons bricht die Service-Worker-Installation ab, wodurch
+  weder "App installieren" noch Offline-Caching funktionierten.
+- Jetzt: echtes Zirkel-Logo in Weiss auf schwarzem Quadrat, korrekt in
+  icons/icon-192.png und icons/icon-512.png, von manifest.json und
+  index.html referenziert.
 
-## Rollen / Admin-Rechte
-
-Im neu angelegten Sheet "Zugangsdaten" gibt es eine Spalte "Rolle".
-Standardmaessig bekommt jeder "mitglied". Wer den Admin-Tab (Lager, Einkauf,
-Inventur) sehen soll, muss dort von Hand auf "kassenwart" oder "admin"
-gesetzt werden -- danach sieht die Person diesen Tab beim naechsten Login.
-
-## Sicherheitshinweis
-
-Das ist ein einfacher, praktikabler Schutz fuer den internen Gebrauch --
-kein hochsicheres Verfahren wie bei einer Bank. Fuer eine Studenten-/Haus-
-verwaltung reicht das aber vollkommen: Passwoerter sind gehasht, jede
-Buchung wird mit dem angemeldeten Namen mitgeloggt (Parameter "absender"),
-und ohne korrektes Passwort kommt niemand hinein.
+## Dateien
+- index.html, app.js, sw.js, manifest.json -- die App selbst
+- icons/icon-192.png, icons/icon-512.png -- euer Zirkel-Logo
+- login-backend-addon.gs -- Name+Passwort-Login fuers Google-Script-Backend
+- stand-backend-addon.gs -- noetige Ergaenzung fuer den Stand-Tab
