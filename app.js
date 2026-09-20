@@ -1,6 +1,5 @@
-
 // ====== KONFIGURATION ======
-const SCRIPT_URL = "https://script.google.com/macros/s/DEINE_DEPLOYMENT_ID/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfx9LSz3QW-pfn5TRkc8QvWIt025rIiKz2QrJLukZ4XytuYaCnAxZSLHBKj9gWLAnj/exec";
 // Fester API-Key des Systems (bleibt wie im ESP32-Sketch) -- schuetzt das
 // Script generell vor fremden Zugriffen. Die persoenliche Anmeldung
 // (Name + Passwort) ist eine ZUSAETZLICHE Schicht darueber.
