@@ -173,36 +173,23 @@ async function rawGet(params, silent){
   }
 }
 
-let sendingInProgress = false;
 async function sendAction(params){
-  if(sendingInProgress){
-    toast("Bitte warten – vorherige Buchung läuft noch");
+  const session = getSession();
+  params.panel = "PWA";
+  if(session){
+    params.absender = session.name;
+    params.konto = session.name;
+  }
+  if(!navigator.onLine){
+    pushQueue(params);
+    toast("Offline gespeichert – wird später gesendet");
     return;
   }
-  sendingInProgress = true;
-  setSendButtonsEnabled(false);
-  const session = getSession();
-  params.panel = (session ? session.name : "Unbekannt") + "PWA";
-  try{
-    if(!navigator.onLine){
-      pushQueue(params);
-      toast("Offline gespeichert – wird später gesendet");
-      return;
-    }
-    const ok = await rawGet(params);
-    if(!ok){
-      pushQueue(params);
-      toast("Fehler – offline gespeichert");
-    }
-  } finally {
-    sendingInProgress = false;
-    setSendButtonsEnabled(navigator.onLine);
+  const ok = await rawGet(params);
+  if(!ok){
+    pushQueue(params);
+    toast("Fehler – offline gespeichert");
   }
-}
-
-function setSendButtonsEnabled(enabled){
-  document.querySelectorAll(".btn-accent, .stepper-btn, .name-btn")
-    .forEach(btn => { btn.disabled = !enabled; });
 }
 
 let toastTimer;
@@ -349,7 +336,7 @@ function backFromMenge(){
 }
 
 function logBuchung(anzahl, typ){
-  sendAction({ name: currentName, menge: anzahl, typ: typ });
+  sendAction({ name: currentName, menge: anzahl, typ: typ, panel: "PWA" });
   toast(`${currentName}: ${anzahl}x ${typ} gebucht`);
   showCats();
 }
