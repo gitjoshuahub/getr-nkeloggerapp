@@ -45,6 +45,19 @@
   .btn-danger{background:var(--danger); color:#fff;}
   .btn-ok{background:var(--ok); color:#062; font-weight:600;}
   .btn-full{grid-column:1/-1; width:100%;}
+
+  /* Outline-Button: nur Rahmen, kein Hintergrund */
+  .btn-outline{
+    background:transparent;
+    border:2px solid var(--accent);
+    color:var(--accent2);
+    font-weight:600;
+  }
+  .btn-outline:active{
+    background:var(--accent);
+    color:#fff;
+  }
+
   .name-list{display:flex; flex-wrap:wrap; gap:8px;}
   .name-list button{flex:1 1 auto; min-width:90px;}
   select, input{
@@ -222,7 +235,7 @@
       </div>
     </div>
 
-    <!-- Rangliste (action=rangliste) -->
+    <!-- Rangliste (action=semester) -->
     <div id="subview-rangliste" class="hidden">
       <div class="card">
         <h2>🏆 Rangliste</h2>

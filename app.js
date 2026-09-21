@@ -6,7 +6,7 @@ const KATEGORIEN = [
   { label: "Non Loci", hasNameList: true, listKey: "nonloci" },
   { label: "Philister", hasNameList: false, logName: "Philister" },
   { label: "Institut", hasNameList: false, logName: "Institut" },
-  { label: "Couleur", hasNameList: false, logName: "Couleur" }
+  { label: "Couleur", hasNameList: false, logName: "Couleur", fullWidth: true }
 ];
 
 let cfg = { haus: [], nonloci: [] };
@@ -199,7 +199,17 @@ function renderCats(){
   KATEGORIEN.forEach((k, idx)=>{
     const b = document.createElement("button");
     b.textContent = k.label;
-    b.className = "btn-accent";
+    // Haus & Non Loci: ausgefüllt (btn-accent)
+    // Philister, Institut, Couleur: nur Rahmen (btn-outline)
+    if(k.hasNameList){
+      b.className = "btn-accent";
+    } else {
+      b.className = "btn-outline";
+    }
+    // Couleur nimmt zwei Spalten ein
+    if(k.fullWidth){
+      b.style.gridColumn = "1 / -1";
+    }
     b.onclick = ()=> selectCat(idx);
     grid.appendChild(b);
   });
@@ -449,7 +459,6 @@ async function loadRangliste(){
     return;
   }
   try{
-    // action=semester liefert die gleiche Ranglisten-Nachricht wie Telegram
     const res = await fetchWithTimeout(buildUrl({action:"semester"}), 15000);
     if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + ")."; return; }
     const text = await res.text();
