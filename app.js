@@ -449,7 +449,7 @@ async function loadStand(){
 async function loadRangliste(){
   const div = document.getElementById("ranglisteResult");
   const hint = document.getElementById("ranglisteCacheHint");
-  div.textContent = "Lade...";
+  div.textContent = "Lade... (kann bis zu 45 Sek. dauern)";
   hint.textContent = "";
   if(!navigator.onLine){
     const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
@@ -459,7 +459,8 @@ async function loadRangliste(){
     return;
   }
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"semester"}), 15000);
+    // Rangliste braucht länger – Timeout auf 45s erhöht
+    const res = await fetchWithTimeout(buildUrl({action:"semester"}), 45000);
     if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + ")."; return; }
     const text = await res.text();
     if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt."; return; }
@@ -471,8 +472,8 @@ async function loadRangliste(){
   }catch(e){
     const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
     const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
-    div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung." : "Fehler beim Laden.") +
-      (cached ? "\n\n" + cached : "");
+    div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung – Server zu langsam." : "Fehler beim Laden.") +
+      (cached ? "\n\nZuletzt gespeichert:\n" + cached : "");
     if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
   }
 }
