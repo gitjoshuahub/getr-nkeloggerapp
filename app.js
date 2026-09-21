@@ -165,7 +165,7 @@ async function sendAction(params){
   const session = getSession();
   params.panel = (session ? session.name : "Unbekannt") + "PWA";
   try{
-    const res = await fetchWithTimeout(buildUrl(params), 5000);
+    const res = await fetchWithTimeout(buildUrl(params), 10000);
     if(!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
     toast(text || "Gebucht!");
