@@ -1,6 +1,3 @@
-// ====== VERSION ======
-// Bei jeder Aenderung hochzaehlen -> zusammen mit CACHE_NAME in sw.js.
-const APP_VERSION = "1.2.0";
 
 // ====== KONFIGURATION ======
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfx9LSz3QW-pfn5TRkc8QvWIt025rIiKz2QrJLukZ4XytuYaCnAxZSLHBKj9gWLAnj/exec";
@@ -17,13 +14,14 @@ const KATEGORIEN = [
 let cfg = { haus: [], nonloci: [], sorten: [] };
 let currentKat = null;
 let currentName = null;
+
+let flaschenWert = 1;
+let kistenWert = 1;
 const FLASCHEN_MAX = 19;
 const KISTEN_MAX = 5;
 
 const SESSION_KEY = "bier_session";
-let sendingInProgress = false;
 
-// ====== SESSION ======
 function getSession(){
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
   catch(e){ return null; }
@@ -42,8 +40,14 @@ async function doLogin(){
     errEl.classList.remove("hidden");
     return;
   }
+
   if(!navigator.onLine){
-    errEl.textContent = "Kein Netz — zum Anmelden brauchst du eine Internetverbindung.";
+    const cached = getSession();
+    if(cached && cached.name.toLowerCase() === name.toLowerCase()){
+      enterApp(cached);
+      return;
+    }
+    errEl.textContent = "Kein Netz -- Erstanmeldung braucht einmalig eine Verbindung.";
     errEl.classList.remove("hidden");
     return;
   }
@@ -54,7 +58,7 @@ async function doLogin(){
     url.searchParams.set("name", name);
     url.searchParams.set("pw", pw);
     url.searchParams.set("key", API_KEY);
-    const res = await fetchWithTimeout(url.toString(), 15000);
+    const res = await fetch(url.toString());
     const data = await res.json();
 
     if(!data.ok){
@@ -81,12 +85,13 @@ function enterApp(session){
   document.getElementById("logoutBtn").classList.remove("hidden");
 
   const isAdmin = session.rolle === "admin" || session.rolle === "kassenwart";
-  const adminTab = document.getElementById("tab-admin");
-  if(adminTab) adminTab.style.display = isAdmin ? "" : "none";
+  document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
 
   renderCats();
   updateStatus();
   fetchConfig();
+  updateQueueBadge();
+  restoreCachedStand();
 }
 
 function doLogout(){
@@ -94,55 +99,55 @@ function doLogout(){
   location.reload();
 }
 
-// Session nur online wiederherstellen -> ohne Netz muss man sich neu einloggen.
 function checkSessionOnLoad(){
   const s = getSession();
-  if(s && navigator.onLine){
+  if(s){
     document.getElementById("loginName").value = s.name;
     enterApp(s);
-  } else if(s && !navigator.onLine){
-    clearSession();
   }
 }
 
-// ====== ONLINE-STATUS ======
+const QUEUE_KEY = "bier_offline_queue";
+function getQueue(){ return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); }
+function setQueue(q){ localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); updateQueueBadge(); }
+function pushQueue(params){ const q = getQueue(); q.push(params); setQueue(q); }
+function updateQueueBadge(){
+  const n = getQueue().length;
+  const b = document.getElementById("queueBadge");
+  if(n>0){ b.textContent=n; b.classList.remove("hidden"); } else { b.classList.add("hidden"); }
+}
+
+async function trySyncQueue(){
+  if(!navigator.onLine) return;
+  let q = getQueue();
+  if(q.length===0) return;
+  const remaining = [];
+  for(const params of q){
+    const ok = await rawGet(params, true);
+    if(!ok) remaining.push(params);
+  }
+  setQueue(remaining);
+  if(remaining.length < q.length) toast(`Sync: ${q.length - remaining.length} Einträge gesendet`);
+}
+
 function updateStatus(){
   const dot = document.getElementById("statusDot");
   const txt = document.getElementById("statusText");
   const banner = document.getElementById("offlineBanner");
   const isOnline = navigator.onLine;
-
   if(isOnline){
-    dot.classList.add("online");
-    txt.textContent = "online";
+    dot.classList.add("online"); txt.textContent="online";
     if(banner) banner.classList.add("hidden");
+    trySyncQueue();
   } else {
-    dot.classList.remove("online");
-    txt.textContent = "offline";
+    dot.classList.remove("online"); txt.textContent="offline";
     if(banner) banner.classList.remove("hidden");
   }
-  setSendButtonsEnabled(isOnline);
 }
-
-// Sperrt/entsperrt alle Buchungs-relevanten Buttons zentral.
-function setSendButtonsEnabled(enabled){
-  document.querySelectorAll(
-    "#catGrid button, #nameList button, #mengeGrid button, " +
-    "#loadStandBtn, #stornoBtn, #loadLagerBtn, #einkaufBtn, #inventurBtn"
-  ).forEach(btn => { btn.disabled = !enabled; });
-}
-
-window.addEventListener("online", () => {
-  updateStatus();
-  toast("Wieder online — Loggen ist jetzt moeglich.");
-});
-window.addEventListener("offline", () => {
-  updateStatus();
-  toast("Kein Netz — Buchungen sind gesperrt, bis wieder online.");
-});
+window.addEventListener("online", updateStatus);
+window.addEventListener("offline", updateStatus);
 setInterval(updateStatus, 5000);
 
-// ====== NETZWERK-HELPER ======
 function buildUrl(params){
   const u = new URL(SCRIPT_URL);
   Object.entries(params).forEach(([k,v]) => u.searchParams.set(k, v));
@@ -150,10 +155,10 @@ function buildUrl(params){
   return u.toString();
 }
 
-function fetchWithTimeout(url, ms = 15000){
+function fetchWithTimeout(url, ms = 6000){
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { signal: controller.signal, cache: "no-store" }).finally(() => clearTimeout(t));
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(t));
 }
 
 async function rawGet(params, silent){
@@ -162,57 +167,40 @@ async function rawGet(params, silent){
     if(!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
     if(!silent) toast(text);
-    return { ok: true, text };
+    return true;
   }catch(e){
-    return { ok: false, text: null };
+    return false;
   }
 }
 
-// Zentrale Sende-Funktion: NUR online, kein Retry-Loop, keine Mehrfachsendung
-// waehrend eine Anfrage noch laeuft.
-async function sendAction(params, silent){
-  if(!navigator.onLine){
-    toast("Kein Netz — Buchung wurde NICHT gespeichert.");
-    updateStatus();
-    return { ok: false };
-  }
-  if(sendingInProgress){
-    toast("Bitte warten — vorherige Aktion wird noch gesendet.");
-    return { ok: false };
-  }
-
+async function sendAction(params){
   const session = getSession();
-  if(session) params.absender = session.name;
-
-  sendingInProgress = true;
-  setSendButtonsEnabled(false);
-  try{
-    const result = await rawGet(params, silent);
-    if(!result.ok){
-      toast("Fehler beim Senden — bitte erneut versuchen.");
-    }
-    return result;
-  } finally {
-    sendingInProgress = false;
-    setSendButtonsEnabled(navigator.onLine);
+  params.panel = (session ? session.name : "Unbekannt") + "PWA";
+  if(!navigator.onLine){
+    pushQueue(params);
+    toast("Offline gespeichert – wird später gesendet");
+    return;
+  }
+  const ok = await rawGet(params);
+  if(!ok){
+    pushQueue(params);
+    toast("Fehler – offline gespeichert");
   }
 }
 
-// ====== TOAST ======
 let toastTimer;
 function toast(msg){
   const t = document.getElementById("toast");
-  if(!t) return;
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>t.classList.remove("show"), 2500);
 }
 
-// ====== KONFIG LADEN (nur online, kein Cache mehr) ======
 async function fetchConfig(){
   if(!navigator.onLine){
-    toast("Offline — Konfiguration kann nicht geladen werden.");
+    const cached = localStorage.getItem("bier_cfg");
+    if(cached) cfg = JSON.parse(cached);
     renderSortenSelects();
     return;
   }
@@ -222,9 +210,11 @@ async function fetchConfig(){
     cfg.haus = data.haus || [];
     cfg.nonloci = data.nonloci || [];
     cfg.sorten = data.sorten || [];
+    localStorage.setItem("bier_cfg", JSON.stringify(cfg));
     renderSortenSelects();
   }catch(e){
-    toast("Konfiguration konnte nicht geladen werden.");
+    const cached = localStorage.getItem("bier_cfg");
+    if(cached) cfg = JSON.parse(cached);
     renderSortenSelects();
   }
 }
@@ -236,24 +226,12 @@ function renderSortenSelects(){
     sel.innerHTML = "";
     cfg.sorten.forEach(s=>{
       const opt = document.createElement("option");
-      opt.value = s;
-      opt.textContent = s;
+      opt.value = s; opt.textContent = s;
       sel.appendChild(opt);
     });
   });
 }
 
-// ====== TABS ======
-function switchTab(tab){
-  ["log","stand","admin"].forEach(t=>{
-    const view = document.getElementById("view-" + t);
-    const btn = document.getElementById("tab-" + t);
-    if(view) view.classList.toggle("hidden", t !== tab);
-    if(btn) btn.classList.toggle("active", t === tab);
-  });
-}
-
-// ====== UI: KATEGORIEN ======
 function renderCats(){
   const grid = document.getElementById("catGrid");
   grid.innerHTML = "";
@@ -261,14 +239,12 @@ function renderCats(){
     const b = document.createElement("button");
     b.textContent = k.label;
     b.className = "btn-accent";
-    b.disabled = !navigator.onLine;
     b.onclick = ()=> selectCat(idx);
     grid.appendChild(b);
   });
 }
 
 function selectCat(idx){
-  if(!navigator.onLine){ toast("Kein Netz — bitte warten."); return; }
   currentKat = KATEGORIEN[idx];
   if(currentKat.hasNameList){
     showNames();
@@ -289,212 +265,184 @@ function showNames(){
   document.getElementById("nameCard").classList.remove("hidden");
   document.getElementById("mengeCard").classList.add("hidden");
   document.getElementById("nameCardTitle").textContent = currentKat.label + " – wer?";
-
   const list = currentKat.listKey === "haus" ? cfg.haus : cfg.nonloci;
   const wrap = document.getElementById("nameList");
   wrap.innerHTML = "";
   list.forEach(name=>{
     const b = document.createElement("button");
     b.textContent = name;
-    b.disabled = !navigator.onLine;
-    b.onclick = ()=>{
-      if(!navigator.onLine){ toast("Kein Netz — bitte warten."); return; }
-      currentName = name;
-      showMenge();
-    };
+    b.onclick = ()=>{ currentName = name; showMenge(); };
     wrap.appendChild(b);
   });
 }
 
-function backFromMenge(){
-  if(currentKat && currentKat.hasNameList){
-    showNames();
-  } else {
-    showCats();
-  }
-}
-
-// ====== UI: MENGE — wieder als reine Knopf-Auswahl ======
-// Ein Klick auf einen Knopf sendet SOFORT die Buchung (kein extra "Buchen"-
-// Knopf mehr noetig), genau wie beim ESP32-Geraet: 1 API-Aufruf mit
-// menge + typ (flasche/kasten). Das entspricht exakt dem, was das
-// Google-Script auch vom ESP32 erwartet -> behebt das Problem, dass
-// zuletzt gar nichts mehr geloggt wurde (falsche Parameter).
 function showMenge(){
   document.getElementById("catCard").classList.add("hidden");
   document.getElementById("nameCard").classList.add("hidden");
   document.getElementById("mengeCard").classList.remove("hidden");
   document.getElementById("mengeTitle").textContent = currentName;
-  renderMengeButtons();
+  flaschenWert = 1;
+  kistenWert = 1;
+  renderMengeSteppers();
 }
 
-function renderMengeButtons(){
+function renderMengeSteppers(){
   const grid = document.getElementById("mengeGrid");
   grid.innerHTML = "";
-  const disabled = !navigator.onLine;
-
-  const flLabel = document.createElement("h2");
-  flLabel.textContent = "Flaschen";
-  grid.appendChild(flLabel);
 
   const flWrap = document.createElement("div");
-  flWrap.className = "grid";
-  for(let i = 1; i <= FLASCHEN_MAX; i++){
-    const b = document.createElement("button");
-    b.textContent = i;
-    b.className = "btn-accent";
-    b.disabled = disabled;
-    b.onclick = () => bucheMenge(i, "flasche");
-    flWrap.appendChild(b);
-  }
+  flWrap.className = "stepper-block";
+  flWrap.innerHTML =
+    '<div class="stepper-label">Flaschen</div>' +
+    '<div class="stepper-row">' +
+      '<button class="stepper-btn" onclick="changeFlaschen(-1)">−</button>' +
+      '<div class="stepper-value" id="flaschenValue">' + flaschenWert + '</div>' +
+      '<button class="stepper-btn" onclick="changeFlaschen(1)">+</button>' +
+    '</div>' +
+    '<button class="btn-full btn-accent" onclick="confirmFlaschen()">Flaschen buchen</button>';
   grid.appendChild(flWrap);
 
-  const kiLabel = document.createElement("h2");
-  kiLabel.style.marginTop = "16px";
-  kiLabel.textContent = "Kisten";
-  grid.appendChild(kiLabel);
-
   const kiWrap = document.createElement("div");
-  kiWrap.className = "grid";
-  for(let i = 1; i <= KISTEN_MAX; i++){
-    const b = document.createElement("button");
-    b.textContent = i;
-    b.className = "btn-accent";
-    b.disabled = disabled;
-    b.onclick = () => bucheMenge(i, "kasten");
-    kiWrap.appendChild(b);
-  }
+  kiWrap.className = "stepper-block";
+  kiWrap.innerHTML =
+    '<div class="stepper-label">Kästen</div>' +
+    '<div class="stepper-row">' +
+      '<button class="stepper-btn" onclick="changeKisten(-1)">−</button>' +
+      '<div class="stepper-value" id="kistenValue">' + kistenWert + '</div>' +
+      '<button class="stepper-btn" onclick="changeKisten(1)">+</button>' +
+    '</div>' +
+    '<button class="btn-full btn-accent" onclick="confirmKisten()">Kästen buchen</button>';
   grid.appendChild(kiWrap);
 }
 
-async function bucheMenge(menge, typ){
-  if(!navigator.onLine){
-    toast("Kein Netz — Buchung wurde NICHT gespeichert.");
-    return;
-  }
-  // Wichtig: KEIN action-Parameter beim Loggen — das Google-Script erwartet
-  // hier genau name/menge/typ/panel, exakt wie es das ESP32-Geraet sendet.
-  const result = await sendAction({
-    name: currentName,
-    menge: menge,
-    typ: typ,
-    panel: "Keller"
-  });
+function changeFlaschen(delta){
+  flaschenWert = Math.min(FLASCHEN_MAX, Math.max(1, flaschenWert + delta));
+  document.getElementById("flaschenValue").textContent = flaschenWert;
+}
+function changeKisten(delta){
+  kistenWert = Math.min(KISTEN_MAX, Math.max(1, kistenWert + delta));
+  document.getElementById("kistenValue").textContent = kistenWert;
+}
+function confirmFlaschen(){ logBuchung(flaschenWert, "flasche"); }
+function confirmKisten(){ logBuchung(kistenWert, "kasten"); }
 
-  if(result.ok){
-    toast(`Gebucht: ${currentName} — ${menge} ${typ === "flasche" ? (menge === 1 ? "Flasche" : "Flaschen") : (menge === 1 ? "Kasten" : "Kisten")}`);
-    showCats();
+function backFromMenge(){
+  if(currentKat.hasNameList) showNames();
+  else showCats();
+}
+
+function logBuchung(anzahl, typ){
+  sendAction({ name: currentName, menge: anzahl, typ: typ, panel: "PWA" });
+  toast(`${currentName}: ${anzahl}x ${typ} gebucht`);
+  showCats();
+}
+
+const STAND_CACHE_KEY = "bier_stand_cache";
+
+function restoreCachedStand(){
+  const cached = localStorage.getItem(STAND_CACHE_KEY);
+  if(cached){
+    const div = document.getElementById("standResult");
+    if(div) div.textContent = cached + "\n\n(zuletzt gespeicherter Stand)";
   }
 }
 
-// ====== STAND / STORNO ======
 async function loadStand(){
-  if(!navigator.onLine){ toast("Kein Netz — Stand kann nicht geladen werden."); return; }
-  const el = document.getElementById("standResult");
-  el.textContent = "Lade...";
-  const result = await rawGet({ action: "stand" }, true);
-  el.textContent = result.ok ? result.text : "Fehler beim Laden.";
+  const div = document.getElementById("standResult");
+  div.textContent = "Lade...";
+
+  if(!navigator.onLine){
+    const cached = localStorage.getItem(STAND_CACHE_KEY);
+    div.textContent = cached ? cached + "\n\n(offline – zuletzt gespeicherter Stand)" : "Kein Netz und kein gespeicherter Stand vorhanden.";
+    return;
+  }
+
+  try{
+    const res = await fetchWithTimeout(buildUrl({action:"stand"}), 8000);
+    if(!res.ok){
+      div.textContent = "Serverfehler (HTTP " + res.status + "). Ist die Action \"stand\" im Backend eingerichtet?";
+      return;
+    }
+    const text = await res.text();
+    if(!text || text.trim().length === 0){
+      div.textContent = "Server hat leere Antwort geschickt. Bitte pruefen, ob action=\"stand\" im doGet() existiert.";
+      return;
+    }
+    div.textContent = text;
+    localStorage.setItem(STAND_CACHE_KEY, text);
+  }catch(e){
+    const cached = localStorage.getItem(STAND_CACHE_KEY);
+    if(e.name === "AbortError"){
+      div.textContent = "Zeitüberschreitung beim Laden." + (cached ? "\n\n" + cached + "\n(zuletzt gespeicherter Stand)" : "");
+    } else {
+      div.textContent = "Fehler beim Laden." + (cached ? "\n\n" + cached + "\n(zuletzt gespeicherter Stand)" : "");
+    }
+  }
 }
 
 async function doStorno(){
-  if(!navigator.onLine){ toast("Kein Netz — Storno nicht moeglich."); return; }
-  const result = await sendAction({ action: "storno" });
-  if(result.ok) loadStand();
-}
-
-// ====== ADMIN: LAGER / EINKAUF / INVENTUR ======
-// Parameter exakt an das angepasst, was das Google-Script vom ESP32-Geraet
-// erwartet (action=getlager, action=einkauf mit typ=kasten, action=inventur
-// mit Gesamtflaschenzahl in "menge").
-async function loadLager(){
-  if(!navigator.onLine){ toast("Kein Netz — Lagerstand kann nicht geladen werden."); return; }
-  const el = document.getElementById("lagerResult");
-  el.textContent = "Lade...";
-  const result = await rawGet({ action: "getlager" }, true);
-  if(!result.ok){ el.textContent = "Fehler beim Laden."; return; }
+  if(!navigator.onLine){
+    toast("Kein Netz -- Storno nicht möglich.");
+    return;
+  }
   try{
-    const data = JSON.parse(result.text);
-    const bestand = data.bestand ?? -1;
-    if(bestand < 0){ el.textContent = "Keine Antwort vom Server."; return; }
-    const kisten = Math.floor(bestand / 20);
-    const rest = bestand % 20;
-    el.textContent = `Lagerstand: ${bestand} Flaschen\n= ${kisten} Kisten + ${rest} Flaschen`;
+    const res = await fetchWithTimeout(buildUrl({action:"storno"}));
+    toast(await res.text());
   }catch(e){
-    el.textContent = result.text;
+    toast("Kein Netz -- Storno nicht möglich.");
   }
 }
 
-async function doEinkauf(){
-  if(!navigator.onLine){ toast("Kein Netz — Einkauf wurde NICHT gebucht."); return; }
-  const sorteEl = document.getElementById("einkaufSorte");
-  const kistenEl = document.getElementById("einkaufKisten");
-  const sorte = sorteEl ? sorteEl.value : "";
-  const kisten = kistenEl ? parseInt(kistenEl.value, 10) : 0;
-
-  if(!kisten || kisten < 1){
-    toast("Bitte gueltige Anzahl Kisten eingeben.");
+async function loadLager(){
+  const div = document.getElementById("lagerResult");
+  div.textContent = "Lade...";
+  if(!navigator.onLine){
+    div.textContent = "Kein Netz – nicht abrufbar.";
     return;
   }
-
-  const result = await sendAction({ action: "einkauf", menge: kisten, typ: "kasten", sorte });
-  if(result.ok){
-    toast(`Einkauf gebucht: ${kisten} Kiste(n) ${sorte}`);
-    if(kistenEl) kistenEl.value = "";
+  try{
+    const res = await fetchWithTimeout(buildUrl({action:"getlager"}));
+    const data = await res.json();
+    let txt = `Gesamtbestand: ${data.bestand} Flaschen\n`;
+    if(data.proSorte){
+      txt += "\nSorten:\n";
+      Object.entries(data.proSorte).forEach(([s,v])=>{ txt += `${s}: ${v ?? "unbekannt"}\n`; });
+    }
+    div.textContent = txt;
+  }catch(e){
+    div.textContent = "Kein Netz – nicht abrufbar.";
   }
 }
 
-async function doInventur(){
-  if(!navigator.onLine){ toast("Kein Netz — Inventur wurde NICHT gebucht."); return; }
-  const sorteEl = document.getElementById("inventurSorte");
-  const flEl = document.getElementById("inventurFlaschen");
-  const sorte = sorteEl ? sorteEl.value : "";
-  const flaschen = flEl ? parseInt(flEl.value, 10) : NaN;
-
-  if(isNaN(flaschen) || flaschen < 0){
-    toast("Bitte gueltige Flaschenzahl eingeben.");
-    return;
-  }
-
-  const result = await sendAction({ action: "inventur", menge: flaschen, sorte });
-  if(result.ok){
-    toast(`Inventur gebucht: ${flaschen} Flaschen ${sorte}`);
-    if(flEl) flEl.value = "";
-  }
+function doEinkauf(){
+  const sorte = document.getElementById("einkaufSorte").value;
+  const kisten = document.getElementById("einkaufKisten").value;
+  if(!kisten || kisten<=0){ toast("Bitte Anzahl Kisten eingeben"); return; }
+  sendAction({ action:"einkauf", menge:kisten, typ:"kasten", sorte });
+  toast(`Einkauf: ${kisten} Kisten ${sorte}`);
 }
 
-// ====== VERSION ANZEIGEN ======
-function showVersion(){
-  const hint = document.getElementById("loginHint");
-  if(hint){
-    const v = document.createElement("div");
-    v.style.marginTop = "8px";
-    v.style.opacity = "0.6";
-    v.style.fontSize = "11px";
-    v.textContent = "Version " + APP_VERSION;
-    hint.appendChild(v);
-  }
+function doInventur(){
+  const sorte = document.getElementById("inventurSorte").value;
+  const flaschen = document.getElementById("inventurFlaschen").value;
+  if(flaschen === ""){ toast("Bitte Flaschenzahl eingeben"); return; }
+  sendAction({ action:"inventur", menge:flaschen, sorte });
+  toast(`Inventur: ${flaschen} Flaschen ${sorte}`);
 }
 
-// ====== INIT ======
-document.addEventListener("DOMContentLoaded", () => {
-  showVersion();
-  checkSessionOnLoad();
-  updateStatus();
-});
+function switchTab(tab){
+  ["log","stand","admin"].forEach(t=>{
+    document.getElementById("view-"+t).classList.toggle("hidden", t!==tab);
+    document.getElementById("tab-"+t).classList.toggle("active", t===tab);
+  });
+}
 
-// Service Worker: nur App-Shell cachen, Buchungen laufen nie ueber den Cache
-// (script.google.com wird im sw.js explizit ausgeschlossen).
+checkSessionOnLoad();
+
 if("serviceWorker" in navigator){
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").then(reg=>{
-      reg.addEventListener("updatefound", () => {
-        const newWorker = reg.installing;
-        newWorker.addEventListener("statechange", () => {
-          if(newWorker.state === "activated"){
-            toast("Neue Version geladen — bitte App einmal neu oeffnen.");
-          }
-        });
-      });
-    }).catch(()=>{});
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js")
+      .then(reg => console.log("SW registriert:", reg.scope))
+      .catch(err => console.error("SW Registrierung fehlgeschlagen:", err));
   });
 }
