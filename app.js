@@ -79,6 +79,7 @@ function enterApp(session){
   fetchConfig();
   updateQueueBadge();
   restoreCachedStand();
+  restoreCachedRangliste();
 }
 
 function doLogout(){ clearSession(); location.reload(); }
@@ -213,12 +214,15 @@ function showCats(){
   document.getElementById("catCard").classList.remove("hidden");
   document.getElementById("nameCard").classList.add("hidden");
   document.getElementById("mengeCard").classList.add("hidden");
+  // Storno-Karte immer sichtbar
+  document.getElementById("stornoCard").classList.remove("hidden");
 }
 
 function showNames(){
   document.getElementById("catCard").classList.add("hidden");
   document.getElementById("nameCard").classList.remove("hidden");
   document.getElementById("mengeCard").classList.add("hidden");
+  document.getElementById("stornoCard").classList.add("hidden");
   document.getElementById("nameCardTitle").textContent = currentKat.label + " – wer?";
   const list = currentKat.listKey === "haus" ? cfg.haus : cfg.nonloci;
   const wrap = document.getElementById("nameList");
@@ -235,6 +239,7 @@ function showMenge(){
   document.getElementById("catCard").classList.add("hidden");
   document.getElementById("nameCard").classList.add("hidden");
   document.getElementById("mengeCard").classList.remove("hidden");
+  document.getElementById("stornoCard").classList.add("hidden");
   document.getElementById("mengeTitle").textContent = currentName;
   flaschenWert = 1; kistenWert = 1;
   renderMengeSteppers();
@@ -276,20 +281,19 @@ function buildAnzahlGrid(max, typ){
   return wrap;
 }
 
-function backFromMenge(){ if(currentKat.hasNameList){ showNames(); } else { showCats(); } }
+function backFromMenge(){
+  if(currentKat.hasNameList){ showNames(); } else { showCats(); }
+}
 
 async function logBuchung(anzahl, typ){
   const ok = await sendAction({ name: currentName, menge: anzahl, typ: typ });
-  if(ok){
-    showCats();
-  }
+  if(ok){ showCats(); }
 }
 
 // ====== ADMIN: Nameslisten rendern ======
 function renderAdminNameLists(){
   const allePersonen = [...cfg.haus, ...cfg.nonloci];
 
-  // Zahlung
   const zahlungList = document.getElementById("zahlungNameList");
   if(zahlungList){
     zahlungList.innerHTML = "";
@@ -301,7 +305,6 @@ function renderAdminNameLists(){
     });
   }
 
-  // Strafe
   const strafeList = document.getElementById("strafeNameList");
   if(strafeList){
     strafeList.innerHTML = "";
@@ -317,16 +320,11 @@ function renderAdminNameLists(){
 function selectAdminName(typ, name, btn){
   const listId = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
   const badgeId = typ === "zahlung" ? "zahlungSelectedBadge" : "strafeSelectedBadge";
-
-  // Alle Buttons in dieser Liste deselektieren
   document.getElementById(listId).querySelectorAll("button").forEach(b => b.classList.remove("selected"));
   btn.classList.add("selected");
-
-  // Badge aktualisieren
   const badge = document.getElementById(badgeId);
   badge.textContent = "✓ " + name;
   badge.classList.remove("hidden");
-
   if(typ === "zahlung") zahlungSelectedName = name;
   else strafeSelectedName = name;
 }
@@ -340,7 +338,6 @@ async function doZahlung(){
   const ok = await sendAction({ action:"zahlung", name: zahlungSelectedName, betrag: betrag });
   if(ok){
     document.getElementById("zahlungBetrag").value = "";
-    // Auswahl zurücksetzen
     document.getElementById("zahlungNameList").querySelectorAll("button").forEach(b => b.classList.remove("selected"));
     document.getElementById("zahlungSelectedBadge").classList.add("hidden");
     zahlungSelectedName = null;
@@ -354,7 +351,6 @@ async function doStrafe(){
   if(!betrag || betrag <= 0){ toast("Bitte einen gültigen Betrag eingeben."); return; }
   const grund = document.getElementById("strafeGrund").value.trim();
   if(!navigator.onLine){ toast("Kein Netz – Strafe nicht möglich."); return; }
-  // GAS erwartet: action=strafe, name=..., betrag=..., grund=... (optional)
   const params = { action:"strafe", name: strafeSelectedName, betrag: betrag };
   if(grund) params.grund = grund;
   const ok = await sendAction(params);
@@ -367,38 +363,108 @@ async function doStrafe(){
   }
 }
 
+// ====== STAND-TAB: Sub-Tabs ======
 const STAND_CACHE_KEY = "bier_stand_cache";
+const STAND_CACHE_TIME_KEY = "bier_stand_cache_time";
+const RANGLISTE_CACHE_KEY = "bier_rangliste_cache";
+const RANGLISTE_CACHE_TIME_KEY = "bier_rangliste_cache_time";
+
+function formatCacheTime(tsStr){
+  if(!tsStr) return "";
+  const d = new Date(parseInt(tsStr));
+  if(isNaN(d)) return "";
+  return d.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+}
+
+function switchStandTab(tab){
+  ["abrechnung","rangliste"].forEach(t=>{
+    document.getElementById("subview-"+t).classList.toggle("hidden", t!==tab);
+    document.getElementById("subtab-"+t).classList.toggle("active", t===tab);
+  });
+}
 
 function restoreCachedStand(){
   const cached = localStorage.getItem(STAND_CACHE_KEY);
-  if(cached){
-    const div = document.getElementById("standResult");
-    if(div) div.textContent = cached + "\n\n(zuletzt gespeicherter Stand)";
+  const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
+  const div = document.getElementById("standResult");
+  const hint = document.getElementById("standCacheHint");
+  if(cached && div){
+    div.textContent = cached;
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(ts);
+  }
+}
+
+function restoreCachedRangliste(){
+  const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
+  const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+  const div = document.getElementById("ranglisteResult");
+  const hint = document.getElementById("ranglisteCacheHint");
+  if(cached && div){
+    div.textContent = cached;
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(ts);
   }
 }
 
 async function loadStand(){
   const div = document.getElementById("standResult");
+  const hint = document.getElementById("standCacheHint");
   div.textContent = "Lade...";
+  hint.textContent = "";
   if(!navigator.onLine){
     const cached = localStorage.getItem(STAND_CACHE_KEY);
-    div.textContent = cached ? cached + "\n\n(offline, zuletzt gespeicherter Stand)" : "Kein Netz und kein gespeicherter Stand vorhanden.";
+    const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
+    div.textContent = cached || "Kein Netz und kein gespeicherter Stand vorhanden.";
+    if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
     return;
   }
   try{
     const res = await fetchWithTimeout(buildUrl({action:"stand"}), 15000);
-    if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + "). Ist die Action 'stand' im Backend eingerichtet?"; return; }
+    if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + ")."; return; }
     const text = await res.text();
-    if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt. Bitte pruefen, ob action=stand im doGet existiert."; return; }
+    if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt."; return; }
     div.textContent = text;
+    const now = Date.now().toString();
     localStorage.setItem(STAND_CACHE_KEY, text);
+    localStorage.setItem(STAND_CACHE_TIME_KEY, now);
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(now);
   }catch(e){
     const cached = localStorage.getItem(STAND_CACHE_KEY);
-    if(e.name === "AbortError"){
-      div.textContent = "Zeitüberschreitung beim Laden." + (cached ? "\n\n" + cached + "\n(zuletzt gespeicherter Stand)" : "");
-    } else {
-      div.textContent = "Fehler beim Laden." + (cached ? "\n\n" + cached + "\n(zuletzt gespeicherter Stand)" : "");
-    }
+    const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
+    div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung." : "Fehler beim Laden.") +
+      (cached ? "\n\n" + cached : "");
+    if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
+  }
+}
+
+async function loadRangliste(){
+  const div = document.getElementById("ranglisteResult");
+  const hint = document.getElementById("ranglisteCacheHint");
+  div.textContent = "Lade...";
+  hint.textContent = "";
+  if(!navigator.onLine){
+    const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
+    const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+    div.textContent = cached || "Kein Netz und keine gespeicherte Rangliste vorhanden.";
+    if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
+    return;
+  }
+  try{
+    // action=semester liefert die gleiche Ranglisten-Nachricht wie Telegram
+    const res = await fetchWithTimeout(buildUrl({action:"semester"}), 15000);
+    if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + ")."; return; }
+    const text = await res.text();
+    if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt."; return; }
+    div.textContent = text;
+    const now = Date.now().toString();
+    localStorage.setItem(RANGLISTE_CACHE_KEY, text);
+    localStorage.setItem(RANGLISTE_CACHE_TIME_KEY, now);
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(now);
+  }catch(e){
+    const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
+    const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+    div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung." : "Fehler beim Laden.") +
+      (cached ? "\n\n" + cached : "");
+    if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
   }
 }
 
