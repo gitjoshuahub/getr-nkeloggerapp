@@ -104,7 +104,7 @@ function updateStatus(){
 }
 window.addEventListener("online", updateStatus);
 window.addEventListener("offline", updateStatus);
-setInterval(updateStatus, 5000);
+setInterval(updateStatus, 15000);
 
 function buildUrl(params){
   const u = new URL(SCRIPT_URL);
