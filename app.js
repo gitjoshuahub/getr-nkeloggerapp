@@ -104,7 +104,7 @@ function updateStatus(){
 }
 window.addEventListener("online", updateStatus);
 window.addEventListener("offline", updateStatus);
-setInterval(updateStatus, 5000);
+setInterval(updateStatus, 15000);
 
 function buildUrl(params){
   const u = new URL(SCRIPT_URL);
@@ -113,7 +113,7 @@ function buildUrl(params){
   return u.toString();
 }
 
-function fetchWithTimeout(url, ms = 6000){
+function fetchWithTimeout(url, ms = 15000){
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(t));
@@ -140,7 +140,7 @@ async function sendAction(params){
   const session = getSession();
   params.panel = (session ? session.name : "Unbekannt") + "PWA";
   try{
-    const res = await fetchWithTimeout(buildUrl(params), 5000);
+    const res = await fetchWithTimeout(buildUrl(params), 15000);
     if(!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
     toast(text || "Gebucht!");
@@ -298,7 +298,7 @@ async function loadStand(){
     return;
   }
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"stand"}), 8000);
+    const res = await fetchWithTimeout(buildUrl({action:"stand"}), 15000);
     if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + "). Ist die Action 'stand' im Backend eingerichtet?"; return; }
     const text = await res.text();
     if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt. Bitte pruefen, ob action=stand im doGet existiert."; return; }
