@@ -1,8 +1,6 @@
-
 // ====== KONFIGURATION ======
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfx9LSz3QW-pfn5TRkc8QvWIt025rIiKz2QrJLukZ4XytuYaCnAxZSLHBKj9gWLAnj/exec";
 const API_KEY = "bier123";
-
 const KATEGORIEN = [
   { label: "Haus", hasNameList: true, listKey: "haus" },
   { label: "Non Loci", hasNameList: true, listKey: "nonloci" },
@@ -11,21 +9,16 @@ const KATEGORIEN = [
   { label: "Couleur", hasNameList: false, logName: "Couleur" }
 ];
 
-let cfg = { haus: [], nonloci: [], sorten: [] };
+let cfg = { haus: [], nonloci: [] };
 let currentKat = null;
 let currentName = null;
-
 let flaschenWert = 1;
 let kistenWert = 1;
 const FLASCHEN_MAX = 19;
 const KISTEN_MAX = 5;
-
 const SESSION_KEY = "bier_session";
 
-function getSession(){
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
-  catch(e){ return null; }
-}
+function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch(e){ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
 function clearSession(){ localStorage.removeItem(SESSION_KEY); }
 
@@ -34,24 +27,18 @@ async function doLogin(){
   const pw = document.getElementById("loginPw").value;
   const errEl = document.getElementById("loginError");
   errEl.classList.add("hidden");
-
   if(!name || !pw || pw.length < 4){
     errEl.textContent = "Bitte Name eingeben und Passwort mit mind. 4 Zeichen.";
     errEl.classList.remove("hidden");
     return;
   }
-
   if(!navigator.onLine){
     const cached = getSession();
-    if(cached && cached.name.toLowerCase() === name.toLowerCase()){
-      enterApp(cached);
-      return;
-    }
+    if(cached && cached.name.toLowerCase() === name.toLowerCase()){ enterApp(cached); return; }
     errEl.textContent = "Kein Netz -- Erstanmeldung braucht einmalig eine Verbindung.";
     errEl.classList.remove("hidden");
     return;
   }
-
   try{
     const url = new URL(SCRIPT_URL);
     url.searchParams.set("action","login");
@@ -60,13 +47,11 @@ async function doLogin(){
     url.searchParams.set("key", API_KEY);
     const res = await fetch(url.toString());
     const data = await res.json();
-
     if(!data.ok){
       errEl.textContent = data.grund || "Anmeldung fehlgeschlagen.";
       errEl.classList.remove("hidden");
       return;
     }
-
     const session = { name: name, pw: pw, rolle: data.rolle || "mitglied" };
     setSession(session);
     if(data.neu){ toast("Willkommen " + name + "! Passwort wurde neu angelegt."); }
@@ -83,10 +68,8 @@ function enterApp(session){
   document.getElementById("loggedInName").textContent = session.name;
   document.getElementById("loggedInName").classList.remove("hidden");
   document.getElementById("logoutBtn").classList.remove("hidden");
-
   const isAdmin = session.rolle === "admin" || session.rolle === "kassenwart";
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
-
   renderCats();
   updateStatus();
   fetchConfig();
@@ -94,40 +77,16 @@ function enterApp(session){
   restoreCachedStand();
 }
 
-function doLogout(){
-  clearSession();
-  location.reload();
-}
+function doLogout(){ clearSession(); location.reload(); }
 
 function checkSessionOnLoad(){
   const s = getSession();
-  if(s){
-    document.getElementById("loginName").value = s.name;
-    enterApp(s);
-  }
+  if(s){ document.getElementById("loginName").value = s.name; enterApp(s); }
 }
 
-const QUEUE_KEY = "bier_offline_queue";
-function getQueue(){ return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); }
-function setQueue(q){ localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); updateQueueBadge(); }
-function pushQueue(params){ const q = getQueue(); q.push(params); setQueue(q); }
 function updateQueueBadge(){
-  const n = getQueue().length;
   const b = document.getElementById("queueBadge");
-  if(n>0){ b.textContent=n; b.classList.remove("hidden"); } else { b.classList.add("hidden"); }
-}
-
-async function trySyncQueue(){
-  if(!navigator.onLine) return;
-  let q = getQueue();
-  if(q.length===0) return;
-  const remaining = [];
-  for(const params of q){
-    const ok = await rawGet(params, true);
-    if(!ok) remaining.push(params);
-  }
-  setQueue(remaining);
-  if(remaining.length < q.length) toast(`Sync: ${q.length - remaining.length} Einträge gesendet`);
+  if(b) b.classList.add("hidden");
 }
 
 function updateStatus(){
@@ -138,7 +97,6 @@ function updateStatus(){
   if(isOnline){
     dot.classList.add("online"); txt.textContent="online";
     if(banner) banner.classList.add("hidden");
-    trySyncQueue();
   } else {
     dot.classList.remove("online"); txt.textContent="offline";
     if(banner) banner.classList.remove("hidden");
@@ -155,7 +113,7 @@ function buildUrl(params){
   return u.toString();
 }
 
-function fetchWithTimeout(url, ms = 15000){
+function fetchWithTimeout(url, ms = 6000){
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(t));
@@ -168,24 +126,37 @@ async function rawGet(params, silent){
     const text = await res.text();
     if(!silent) toast(text);
     return true;
-  }catch(e){
+  }catch(e){ return false; }
+}
+
+let sendingInProgress = false;
+async function sendAction(params){
+  if(sendingInProgress){
+    toast("Bitte warten – vorherige Buchung läuft noch");
     return false;
+  }
+  sendingInProgress = true;
+  setSendButtonsEnabled(false);
+  const session = getSession();
+  params.panel = (session ? session.name : "Unbekannt") + "PWA";
+  try{
+    const res = await fetchWithTimeout(buildUrl(params), 5000);
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
+    toast(text || "Gebucht!");
+    return true;
+  }catch(e){
+    toast("Fehler – Buchung wurde NICHT gespeichert. Bitte erneut versuchen.");
+    return false;
+  } finally {
+    sendingInProgress = false;
+    setSendButtonsEnabled(true);
   }
 }
 
-async function sendAction(params){
-  const session = getSession();
-  if(session) params.absender = session.name;
-  if(!navigator.onLine){
-    pushQueue(params);
-    toast("Offline gespeichert – wird später gesendet");
-    return;
-  }
-  const ok = await rawGet(params);
-  if(!ok){
-    pushQueue(params);
-    toast("Fehler – offline gespeichert");
-  }
+function setSendButtonsEnabled(enabled){
+  document.querySelectorAll(".btn-accent, .anzahl-btn, .name-btn, .btn-ok")
+    .forEach(btn => { btn.disabled = !enabled; });
 }
 
 let toastTimer;
@@ -201,7 +172,6 @@ async function fetchConfig(){
   if(!navigator.onLine){
     const cached = localStorage.getItem("bier_cfg");
     if(cached) cfg = JSON.parse(cached);
-    renderSortenSelects();
     return;
   }
   try{
@@ -209,27 +179,11 @@ async function fetchConfig(){
     const data = await res.json();
     cfg.haus = data.haus || [];
     cfg.nonloci = data.nonloci || [];
-    cfg.sorten = data.sorten || [];
     localStorage.setItem("bier_cfg", JSON.stringify(cfg));
-    renderSortenSelects();
   }catch(e){
     const cached = localStorage.getItem("bier_cfg");
     if(cached) cfg = JSON.parse(cached);
-    renderSortenSelects();
   }
-}
-
-function renderSortenSelects(){
-  ["einkaufSorte","inventurSorte"].forEach(id=>{
-    const sel = document.getElementById(id);
-    if(!sel) return;
-    sel.innerHTML = "";
-    cfg.sorten.forEach(s=>{
-      const opt = document.createElement("option");
-      opt.value = s; opt.textContent = s;
-      sel.appendChild(opt);
-    });
-  });
 }
 
 function renderCats(){
@@ -246,12 +200,7 @@ function renderCats(){
 
 function selectCat(idx){
   currentKat = KATEGORIEN[idx];
-  if(currentKat.hasNameList){
-    showNames();
-  } else {
-    currentName = currentKat.logName;
-    showMenge();
-  }
+  if(currentKat.hasNameList){ showNames(); } else { currentName = currentKat.logName; showMenge(); }
 }
 
 function showCats(){
@@ -281,8 +230,7 @@ function showMenge(){
   document.getElementById("nameCard").classList.add("hidden");
   document.getElementById("mengeCard").classList.remove("hidden");
   document.getElementById("mengeTitle").textContent = currentName;
-  flaschenWert = 1;
-  kistenWert = 1;
+  flaschenWert = 1; kistenWert = 1;
   renderMengeSteppers();
 }
 
@@ -292,49 +240,43 @@ function renderMengeSteppers(){
 
   const flWrap = document.createElement("div");
   flWrap.className = "stepper-block";
-  flWrap.innerHTML =
-    '<div class="stepper-label">Flaschen</div>' +
-    '<div class="stepper-row">' +
-      '<button class="stepper-btn" onclick="changeFlaschen(-1)">−</button>' +
-      '<div class="stepper-value" id="flaschenValue">' + flaschenWert + '</div>' +
-      '<button class="stepper-btn" onclick="changeFlaschen(1)">+</button>' +
-    '</div>' +
-    '<button class="btn-full btn-accent" onclick="confirmFlaschen()">Flaschen buchen</button>';
+  const flLabel = document.createElement("div");
+  flLabel.className = "stepper-label";
+  flLabel.textContent = "Flaschen";
+  flWrap.appendChild(flLabel);
+  flWrap.appendChild(buildAnzahlGrid(FLASCHEN_MAX, "flasche"));
   grid.appendChild(flWrap);
 
   const kiWrap = document.createElement("div");
   kiWrap.className = "stepper-block";
-  kiWrap.innerHTML =
-    '<div class="stepper-label">Kästen</div>' +
-    '<div class="stepper-row">' +
-      '<button class="stepper-btn" onclick="changeKisten(-1)">−</button>' +
-      '<div class="stepper-value" id="kistenValue">' + kistenWert + '</div>' +
-      '<button class="stepper-btn" onclick="changeKisten(1)">+</button>' +
-    '</div>' +
-    '<button class="btn-full btn-accent" onclick="confirmKisten()">Kästen buchen</button>';
+  const kiLabel = document.createElement("div");
+  kiLabel.className = "stepper-label";
+  kiLabel.textContent = "Kästen";
+  kiWrap.appendChild(kiLabel);
+  kiWrap.appendChild(buildAnzahlGrid(KISTEN_MAX, "kasten"));
   grid.appendChild(kiWrap);
 }
 
-function changeFlaschen(delta){
-  flaschenWert = Math.min(FLASCHEN_MAX, Math.max(1, flaschenWert + delta));
-  document.getElementById("flaschenValue").textContent = flaschenWert;
-}
-function changeKisten(delta){
-  kistenWert = Math.min(KISTEN_MAX, Math.max(1, kistenWert + delta));
-  document.getElementById("kistenValue").textContent = kistenWert;
-}
-function confirmFlaschen(){ logBuchung(flaschenWert, "flasche"); }
-function confirmKisten(){ logBuchung(kistenWert, "kasten"); }
-
-function backFromMenge(){
-  if(currentKat.hasNameList) showNames();
-  else showCats();
+function buildAnzahlGrid(max, typ){
+  const wrap = document.createElement("div");
+  wrap.className = "anzahl-grid";
+  for(let i = 1; i <= max; i++){
+    const b = document.createElement("button");
+    b.textContent = i;
+    b.className = "anzahl-btn";
+    b.onclick = () => logBuchung(i, typ);
+    wrap.appendChild(b);
+  }
+  return wrap;
 }
 
-function logBuchung(anzahl, typ){
-  sendAction({ name: currentName, menge: anzahl, typ: typ, panel: "PWA" });
-  toast(`${currentName}: ${anzahl}x ${typ} gebucht`);
-  showCats();
+function backFromMenge(){ if(currentKat.hasNameList){ showNames(); } else { showCats(); } }
+
+async function logBuchung(anzahl, typ){
+  const ok = await sendAction({ name: currentName, menge: anzahl, typ: typ });
+  if(ok){
+    showCats();
+  }
 }
 
 const STAND_CACHE_KEY = "bier_stand_cache";
@@ -350,24 +292,16 @@ function restoreCachedStand(){
 async function loadStand(){
   const div = document.getElementById("standResult");
   div.textContent = "Lade...";
-
   if(!navigator.onLine){
     const cached = localStorage.getItem(STAND_CACHE_KEY);
-    div.textContent = cached ? cached + "\n\n(offline – zuletzt gespeicherter Stand)" : "Kein Netz und kein gespeicherter Stand vorhanden.";
+    div.textContent = cached ? cached + "\n\n(offline, zuletzt gespeicherter Stand)" : "Kein Netz und kein gespeicherter Stand vorhanden.";
     return;
   }
-
   try{
     const res = await fetchWithTimeout(buildUrl({action:"stand"}), 8000);
-    if(!res.ok){
-      div.textContent = "Serverfehler (HTTP " + res.status + "). Ist die Action \"stand\" im Backend eingerichtet?";
-      return;
-    }
+    if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + "). Ist die Action 'stand' im Backend eingerichtet?"; return; }
     const text = await res.text();
-    if(!text || text.trim().length === 0){
-      div.textContent = "Server hat leere Antwort geschickt. Bitte pruefen, ob action=\"stand\" im doGet() existiert.";
-      return;
-    }
+    if(!text || text.trim().length === 0){ div.textContent = "Server hat leere Antwort geschickt. Bitte pruefen, ob action=stand im doGet existiert."; return; }
     div.textContent = text;
     localStorage.setItem(STAND_CACHE_KEY, text);
   }catch(e){
@@ -381,54 +315,34 @@ async function loadStand(){
 }
 
 async function doStorno(){
-  if(!navigator.onLine){
-    toast("Kein Netz -- Storno nicht möglich.");
-    return;
-  }
+  if(!navigator.onLine){ toast("Kein Netz -- Storno nicht möglich."); return; }
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"storno"}), 15000);
-    if(!res.ok) throw new Error("HTTP " + res.status);
+    const res = await fetchWithTimeout(buildUrl({action:"storno"}));
     toast(await res.text());
-  }catch(e){
-    toast("Fehler beim Storno – bitte erneut versuchen.");
-  }
+  }catch(e){ toast("Kein Netz -- Storno nicht möglich."); }
 }
 
 async function loadLager(){
   const div = document.getElementById("lagerResult");
   div.textContent = "Lade...";
-  if(!navigator.onLine){
-    div.textContent = "Kein Netz – nicht abrufbar.";
-    return;
-  }
+  if(!navigator.onLine){ div.textContent = "Kein Netz – nicht abrufbar."; return; }
   try{
     const res = await fetchWithTimeout(buildUrl({action:"getlager"}));
     const data = await res.json();
-    let txt = `Gesamtbestand: ${data.bestand} Flaschen\n`;
-    if(data.proSorte){
-      txt += "\nSorten:\n";
-      Object.entries(data.proSorte).forEach(([s,v])=>{ txt += `${s}: ${v ?? "unbekannt"}\n`; });
-    }
-    div.textContent = txt;
-  }catch(e){
-    div.textContent = "Kein Netz – nicht abrufbar.";
-  }
+    div.textContent = "Gesamtbestand: " + data.bestand + " Flaschen";
+  }catch(e){ div.textContent = "Kein Netz – nicht abrufbar."; }
 }
 
-function doEinkauf(){
-  const sorte = document.getElementById("einkaufSorte").value;
+async function doEinkauf(){
   const kisten = document.getElementById("einkaufKisten").value;
-  if(!kisten || kisten<=0){ toast("Bitte Anzahl Kisten eingeben"); return; }
-  sendAction({ action:"einkauf", menge:kisten, typ:"kasten", sorte });
-  toast(`Einkauf: ${kisten} Kisten ${sorte}`);
+  if(!kisten || kisten <= 0){ toast("Bitte Anzahl Kisten eingeben"); return; }
+  await sendAction({ action:"einkauf", menge:kisten, typ:"kasten" });
 }
 
-function doInventur(){
-  const sorte = document.getElementById("inventurSorte").value;
+async function doInventur(){
   const flaschen = document.getElementById("inventurFlaschen").value;
-  if(flaschen === ""){ toast("Bitte Flaschenzahl eingeben"); return; }
-  sendAction({ action:"inventur", menge:flaschen, sorte });
-  toast(`Inventur: ${flaschen} Flaschen ${sorte}`);
+  if(!flaschen){ toast("Bitte Flaschenzahl eingeben"); return; }
+  await sendAction({ action:"inventur", menge:flaschen });
 }
 
 function switchTab(tab){
@@ -441,9 +355,9 @@ function switchTab(tab){
 checkSessionOnLoad();
 
 if("serviceWorker" in navigator){
-  window.addEventListener("load", ()=>{
+  window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js")
-      .then(reg => console.log("SW registriert:", reg.scope))
-      .catch(err => console.error("SW Registrierung fehlgeschlagen:", err));
+      .then(reg => console.log("SW registriert", reg.scope))
+      .catch(err => console.error("SW Registrierung fehlgeschlagen", err));
   });
 }
