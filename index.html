@@ -11,64 +11,105 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
-:root{
-  --bg:#000000; --card:#111111; --card2:#1a1a1a;
-  --accent:#e5383b; --accent2:#ff5a5f; --text:#f2f2f2;
-  --muted:#8a8a8a; --danger:#e5383b; --ok:#3ecf6e; --border:#222222;
-}
-*{box-sizing:border-box;}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;}
-header{padding:12px 16px 0 16px;background:var(--bg);position:sticky;top:0;z-index:10;}
-.header-top{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;}
-header h1{font-size:18px;margin:0;color:var(--accent2);font-weight:700;display:flex;align-items:center;gap:8px;}
-header h1 img, .login-box h1 img{height:26px; width:26px; object-fit:contain;}
-#statusDot{width:9px;height:9px;border-radius:50%;background:var(--danger);display:inline-block;margin-right:6px;}
-#statusDot.online{background:var(--ok);}
-main{flex:1;padding:16px;max-width:480px;margin:0 auto;width:100%;}
-.card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px;border:1px solid var(--border);}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
-button{font-size:16px;padding:14px 10px;border-radius:10px;border:none;background:var(--card2);color:var(--text);cursor:pointer;transition:.15s;}
-button:active{transform:scale(0.97);}
-.btn-accent{background:var(--accent);color:#fff;font-weight:600;}
-.btn-danger{background:var(--danger);color:#fff;}
-.btn-ok{background:var(--ok);color:#062;font-weight:600;}
-.btn-full{grid-column:1/-1;width:100%;}
-.name-list{display:flex;flex-wrap:wrap;gap:8px;}
-.name-list button{flex:1 1 auto;min-width:90px;}
-select,input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:#0a0a0a;color:var(--text);font-size:16px;margin-bottom:10px;}
-h2{font-size:15px;color:var(--muted);margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;}
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:12px 20px;border-radius:10px;opacity:0;transition:.3s;pointer-events:none;max-width:90%;text-align:center;z-index:999;border:1px solid var(--border);}
-#toast.show{opacity:1;}
-.queueBadge{background:var(--accent);color:#fff;border-radius:20px;padding:2px 8px;font-size:12px;margin-left:6px;}
-.tabbar{display:flex;gap:4px;background:var(--card);border-radius:12px;padding:4px;border:1px solid var(--border);margin-bottom:12px;}
-.tabbar button{flex:1;border-radius:8px;background:transparent;padding:10px 0;font-size:13px;color:var(--muted);}
-.tabbar button.active{color:#fff;background:var(--accent);}
-.hidden{display:none !important;}
-.back-row{margin-bottom:10px;}
-small.muted{color:var(--muted);}
-.grid.menge-grid{grid-template-columns:1fr;gap:14px;}
-.stepper-block{background:var(--card2);border-radius:12px;padding:14px;border:1px solid var(--border);}
-.stepper-label{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
-.stepper-row{display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:12px;}
-.stepper-btn{width:48px;height:48px;border-radius:50%;font-size:22px;font-weight:700;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0;}
-.stepper-btn:active{background:var(--accent);}
-.stepper-value{font-size:32px;font-weight:700;min-width:56px;text-align:center;color:var(--accent2);}
-.input-row{display:flex;gap:10px;align-items:stretch;}
-.input-row input{margin-bottom:0;flex:1;min-width:0;}
-.input-row button{flex:0 0 auto;white-space:nowrap;padding:0 18px;}
-.login-overlay{position:fixed;inset:0;background:var(--bg);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px;}
-.login-overlay.hidden{display:none;}
-.login-box{background:var(--card);border-radius:16px;padding:28px 22px;max-width:340px;width:100%;border:1px solid var(--border);text-align:center;}
-.login-box h1{color:var(--accent2);margin-bottom:4px;font-size:20px;justify-content:center;}
-.login-box p{color:var(--muted);font-size:13px;margin:0 0 16px;}
-.login-hint{font-size:12px !important;color:var(--muted);margin-top:10px !important;}
-.login-error{color:var(--danger);font-size:13px;margin-top:10px !important;}
-.loggedInName{font-size:13px;color:var(--muted);margin-right:4px;}
-.logout-btn{background:transparent;padding:4px 8px;font-size:16px;color:var(--muted);}
-.app-hidden{display:none !important;}
-.offline-banner{background:#3a1a1a;color:#ff9d9d;font-size:12px;text-align:center;padding:6px;border-radius:8px;margin-bottom:12px;border:1px solid #5a2a2a;}
-.offline-banner.hidden{display:none;}
+  :root{
+    --bg:#000000; --card:#111111; --card2:#1a1a1a;
+    --accent:#e5383b; --accent2:#ff5a5f;
+    --text:#f2f2f2; --muted:#8a8a8a; --danger:#e5383b; --ok:#3ecf6e;
+    --border:#222222;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+    display:flex; flex-direction:column;
+  }
+  header{
+    padding:12px 16px 0 16px; background:var(--bg); position:sticky; top:0; z-index:10;
+  }
+  .header-top{
+    display:flex; align-items:center; justify-content:space-between; padding-bottom:10px;
+  }
+  header h1{font-size:18px; margin:0; color:var(--accent2); font-weight:700; display:flex; align-items:center; gap:8px;}
+  header h1 img{height:26px; width:26px; object-fit:contain;}
+  #statusDot{width:9px;height:9px;border-radius:50%;background:var(--danger); display:inline-block; margin-right:6px;}
+  #statusDot.online{background:var(--ok);}
+  main{flex:1; padding:16px; max-width:480px; margin:0 auto; width:100%;}
+  .card{background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; border:1px solid var(--border);}
+  .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+  button{
+    font-size:16px; padding:14px 10px; border-radius:10px; border:none;
+    background:var(--card2); color:var(--text); cursor:pointer; transition:.15s;
+  }
+  button:active{transform:scale(0.97);}
+  .btn-accent{background:var(--accent); color:#fff; font-weight:600;}
+  .btn-danger{background:var(--danger); color:#fff;}
+  .btn-ok{background:var(--ok); color:#062; font-weight:600;}
+  .btn-full{grid-column:1/-1; width:100%;}
+  .name-list{display:flex; flex-wrap:wrap; gap:8px;}
+  .name-list button{flex:1 1 auto; min-width:90px;}
+  select, input{
+    width:100%; padding:12px; border-radius:10px; border:1px solid var(--border);
+    background:#0a0a0a; color:var(--text); font-size:16px; margin-bottom:10px;
+  }
+  h2{font-size:15px; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.5px;}
+  #toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:#1a1a1a; color:#fff; padding:12px 20px; border-radius:10px;
+    opacity:0; transition:.3s; pointer-events:none; max-width:90%; text-align:center; z-index:999;
+    border:1px solid var(--border);
+  }
+  #toast.show{opacity:1;}
+  .queueBadge{
+    background:var(--accent); color:#fff; border-radius:20px; padding:2px 8px; font-size:12px; margin-left:6px;
+  }
+
+  .tabbar{
+    display:flex; gap:4px; background:var(--card); border-radius:12px; padding:4px;
+    border:1px solid var(--border); margin-bottom:12px;
+  }
+  .tabbar button{
+    flex:1; border-radius:8px; background:transparent; padding:10px 0; font-size:13px; color:var(--muted);
+  }
+  .tabbar button.active{color:#fff; background:var(--accent);}
+
+  .hidden{display:none !important;}
+  .back-row{margin-bottom:10px;}
+  small.muted{color:var(--muted);}
+
+  .grid.menge-grid{grid-template-columns:1fr; gap:14px;}
+  .stepper-block{
+    background:var(--card2); border-radius:12px; padding:14px; border:1px solid var(--border);
+  }
+  .stepper-label{font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px;}
+  .anzahl-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
+  .anzahl-btn{
+    aspect-ratio:1/1; border-radius:10px; font-size:18px; font-weight:700;
+    background:var(--bg); border:1px solid var(--border); color:var(--text); padding:0;
+  }
+  .anzahl-btn:active{background:var(--accent); color:#fff;}
+  .anzahl-btn:disabled{opacity:.4;}
+
+  .login-overlay{
+    position:fixed; inset:0; background:var(--bg); z-index:2000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .login-overlay.hidden{display:none;}
+  .login-box{
+    background:var(--card); border-radius:16px; padding:28px 22px; max-width:340px; width:100%;
+    border:1px solid var(--border); text-align:center;
+  }
+  .login-box h1{color:var(--accent2); margin-bottom:4px; font-size:20px; justify-content:center;}
+  .login-box p{color:var(--muted); font-size:13px; margin:0 0 16px;}
+  .login-hint{font-size:12px !important; color:var(--muted); margin-top:10px !important;}
+  .login-error{color:var(--danger); font-size:13px; margin-top:10px !important;}
+  .loggedInName{font-size:13px; color:var(--muted); margin-right:4px;}
+  .logout-btn{background:transparent; padding:4px 8px; font-size:16px; color:var(--muted);}
+  .app-hidden{display:none !important;}
+  .offline-banner{
+    background:#3a1a1a; color:#ff9d9d; font-size:12px; text-align:center;
+    padding:6px; border-radius:8px; margin-bottom:12px; border:1px solid #5a2a2a;
+  }
+  .offline-banner.hidden{display:none;}
 </style>
 </head>
 <body>
@@ -86,80 +127,84 @@ small.muted{color:var(--muted);}
 </div>
 
 <div id="appRoot" class="app-hidden">
-  <header>
-    <div class="header-top">
-      <h1><img src="icons/icon-192.png" alt=""> KoeWi Bierlogger</h1>
-      <div>
-        <span id="loggedInName" class="loggedInName hidden"></span>
-        <span id="statusDot"></span><span id="statusText">offline</span>
-        <span id="queueBadge" class="queueBadge hidden">0</span>
-        <button id="logoutBtn" class="logout-btn hidden" onclick="doLogout()">⏻</button>
-      </div>
+
+<header>
+  <div class="header-top">
+    <h1><img src="icons/icon-192.png" alt=""> KoeWi Bierlogger</h1>
+    <div>
+      <span id="loggedInName" class="loggedInName hidden"></span>
+      <span id="statusDot"></span><span id="statusText">offline</span>
+      <button id="logoutBtn" class="logout-btn hidden" onclick="doLogout()">⏏</button>
     </div>
-    <div class="tabbar">
-      <button id="tab-log" class="active" onclick="switchTab('log')">Buchen</button>
-      <button id="tab-stand" onclick="switchTab('stand')">Stand</button>
-      <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
+  </div>
+  <div class="tabbar">
+    <button id="tab-log" class="active" onclick="switchTab('log')">Buchen</button>
+    <button id="tab-stand" onclick="switchTab('stand')">Stand</button>
+    <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
+  </div>
+</header>
+
+<main>
+
+  <div id="offlineBanner" class="offline-banner hidden">📡 Kein Netz – Buchen aktuell nicht möglich</div>
+
+  <section id="view-log" class="view">
+    <div class="card" id="catCard">
+      <h2>Kategorie</h2>
+      <div class="grid" id="catGrid"></div>
     </div>
-  </header>
 
-  <main>
-    <div id="offlineBanner" class="offline-banner hidden">📡 Kein Netz – Buchungen werden zwischengespeichert</div>
+    <div class="card hidden" id="nameCard">
+      <div class="back-row"><button onclick="showCats()">⬅ Zurück</button></div>
+      <h2 id="nameCardTitle">Wer?</h2>
+      <div class="name-list" id="nameList"></div>
+    </div>
 
-    <section id="view-log" class="view">
-      <div class="card" id="catCard">
-        <h2>Kategorie</h2>
-        <div class="grid" id="catGrid"></div>
-      </div>
-      <div class="card hidden" id="nameCard">
-        <div class="back-row"><button onclick="showCats()">⬅ Zurück</button></div>
-        <h2 id="nameCardTitle">Wer?</h2>
-        <div class="name-list" id="nameList"></div>
-      </div>
-      <div class="card hidden" id="mengeCard">
-        <div class="back-row"><button onclick="backFromMenge()">⬅ Zurück</button></div>
-        <h2 id="mengeTitle">Wie viel?</h2>
-        <div class="grid menge-grid" id="mengeGrid"></div>
-      </div>
-    </section>
+    <div class="card hidden" id="mengeCard">
+      <div class="back-row"><button onclick="backFromMenge()">⬅ Zurück</button></div>
+      <h2 id="mengeTitle">Wie viel?</h2>
+      <div class="grid menge-grid" id="mengeGrid"></div>
+    </div>
+  </section>
 
-    <section id="view-stand" class="view hidden">
-      <div class="card">
-        <h2>Aktueller Stand</h2>
-        <button class="btn-full btn-accent" onclick="loadStand()">Stand laden</button>
-        <div id="standResult" style="margin-top:12px;white-space:pre-wrap;font-size:14px;"></div>
-      </div>
-      <div class="card">
-        <h2>Letzte Buchung stornieren</h2>
-        <button class="btn-full btn-danger" onclick="doStorno()">Stornieren (5 Min. Frist)</button>
-      </div>
-    </section>
+  <section id="view-stand" class="view hidden">
+    <div class="card">
+      <h2>Aktueller Stand</h2>
+      <button class="btn-full btn-accent" onclick="loadStand()">Stand laden</button>
+      <div id="standResult" style="margin-top:12px; white-space:pre-wrap; font-size:14px;"></div>
+    </div>
+    <div class="card">
+      <h2>Letzte Buchung stornieren</h2>
+      <button class="btn-full btn-danger" onclick="doStorno()">Stornieren (5 Min. Frist)</button>
+    </div>
+  </section>
 
-    <section id="view-admin" class="view hidden">
-      <div class="card">
-        <h2>Lager</h2>
-        <button class="btn-full" onclick="loadLager()">Lagerstand anzeigen</button>
-        <div id="lagerResult" style="margin-top:12px;white-space:pre-wrap;font-size:14px;"></div>
-      </div>
-      <div class="card">
-        <h2>Einkauf</h2>
-        <div class="input-row">
-          <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
-          <button class="btn-ok" onclick="doEinkauf()">Buchen</button>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Inventur</h2>
-        <div class="input-row">
-          <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen (gesamt)">
-          <button class="btn-accent" onclick="doInventur()">Buchen</button>
-        </div>
-      </div>
-    </section>
-  </main>
+  <section id="view-admin" class="view hidden">
+    <div class="card">
+      <h2>Lager</h2>
+      <button class="btn-full" onclick="loadLager()">Lagerstand anzeigen</button>
+      <div id="lagerResult" style="margin-top:12px; white-space:pre-wrap; font-size:14px;"></div>
+    </div>
+    <div class="card">
+      <h2>Einkauf</h2>
+      <select id="einkaufSorte"></select>
+      <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
+      <button class="btn-full btn-ok" onclick="doEinkauf()">Einkauf buchen</button>
+    </div>
+    <div class="card">
+      <h2>Inventur</h2>
+      <select id="inventurSorte"></select>
+      <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen gesamt">
+      <button class="btn-full btn-accent" onclick="doInventur()">Inventur buchen</button>
+    </div>
+  </section>
+
+</main>
+
 </div>
 
 <div id="toast"></div>
+
 <script src="app.js"></script>
 </body>
 </html>
