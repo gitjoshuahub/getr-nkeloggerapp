@@ -88,6 +88,9 @@
   }
   .anzahl-btn:active{background:var(--accent); color:#fff;}
   .anzahl-btn:disabled{opacity:.4;}
+  .input-row{display:flex; gap:8px;}
+  .input-row input{margin-bottom:0; flex:1;}
+  .input-row button{flex:0 0 auto; white-space:nowrap;}
 
   .login-overlay{
     position:fixed; inset:0; background:var(--bg); z-index:2000;
@@ -187,15 +190,17 @@
     </div>
     <div class="card">
       <h2>Einkauf</h2>
-      <select id="einkaufSorte"></select>
-      <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
-      <button class="btn-full btn-ok" onclick="doEinkauf()">Einkauf buchen</button>
+      <div class="input-row">
+        <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
+        <button class="btn-ok" onclick="doEinkauf()">Buchen</button>
+      </div>
     </div>
     <div class="card">
       <h2>Inventur</h2>
-      <select id="inventurSorte"></select>
-      <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen gesamt">
-      <button class="btn-full btn-accent" onclick="doInventur()">Inventur buchen</button>
+      <div class="input-row">
+        <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen gesamt">
+        <button class="btn-accent" onclick="doInventur()">Buchen</button>
+      </div>
     </div>
   </section>
 
