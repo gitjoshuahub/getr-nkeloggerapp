@@ -113,6 +113,16 @@
     padding:6px; border-radius:8px; margin-bottom:12px; border:1px solid #5a2a2a;
   }
   .offline-banner.hidden{display:none;}
+
+  /* Admin Namensauswahl */
+  .admin-name-list{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;}
+  .admin-name-list button{flex:1 1 auto; min-width:80px; font-size:14px; padding:10px 8px;}
+  .admin-name-list button.selected{background:var(--accent); color:#fff;}
+  .selected-name-badge{
+    display:inline-block; background:var(--card2); border:1px solid var(--accent);
+    border-radius:8px; padding:4px 10px; font-size:13px; color:var(--accent2); margin-bottom:8px;
+  }
+  .selected-name-badge.hidden{display:none !important;}
 </style>
 </head>
 <body>
@@ -183,11 +193,13 @@
   </section>
 
   <section id="view-admin" class="view hidden">
+
     <div class="card">
       <h2>Lager</h2>
       <button class="btn-full" onclick="loadLager()">Lagerstand anzeigen</button>
       <div id="lagerResult" style="margin-top:12px; white-space:pre-wrap; font-size:14px;"></div>
     </div>
+
     <div class="card">
       <h2>Einkauf</h2>
       <div class="input-row">
@@ -195,6 +207,7 @@
         <button class="btn-ok" onclick="doEinkauf()">Buchen</button>
       </div>
     </div>
+
     <div class="card">
       <h2>Inventur</h2>
       <div class="input-row">
@@ -202,6 +215,32 @@
         <button class="btn-accent" onclick="doInventur()">Buchen</button>
       </div>
     </div>
+
+    <div class="card">
+      <h2>💸 Zahlung eintragen</h2>
+      <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
+      <div class="admin-name-list" id="zahlungNameList"></div>
+      <span id="zahlungSelectedBadge" class="selected-name-badge hidden"></span>
+      <div class="input-row">
+        <input id="zahlungBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 8.50)">
+        <button class="btn-ok" onclick="doZahlung()">Buchen</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⚡ Strafe eintragen</h2>
+      <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
+      <div class="admin-name-list" id="strafeNameList"></div>
+      <span id="strafeSelectedBadge" class="selected-name-badge hidden"></span>
+      <div class="input-row" style="margin-bottom:8px;">
+        <input id="strafeBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 2.50)">
+      </div>
+      <div class="input-row">
+        <input id="strafeGrund" type="text" placeholder="Grund (optional, z.B. Zu spät)" style="margin-bottom:0;">
+        <button class="btn-danger" onclick="doStrafe()">Buchen</button>
+      </div>
+    </div>
+
   </section>
 
 </main>

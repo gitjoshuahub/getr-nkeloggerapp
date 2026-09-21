@@ -18,6 +18,10 @@ const FLASCHEN_MAX = 19;
 const KISTEN_MAX = 5;
 const SESSION_KEY = "bier_session";
 
+// Admin-Auswahl State
+let zahlungSelectedName = null;
+let strafeSelectedName = null;
+
 function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch(e){ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
 function clearSession(){ localStorage.removeItem(SESSION_KEY); }
@@ -172,6 +176,7 @@ async function fetchConfig(){
   if(!navigator.onLine){
     const cached = localStorage.getItem("bier_cfg");
     if(cached) cfg = JSON.parse(cached);
+    renderAdminNameLists();
     return;
   }
   try{
@@ -184,6 +189,7 @@ async function fetchConfig(){
     const cached = localStorage.getItem("bier_cfg");
     if(cached) cfg = JSON.parse(cached);
   }
+  renderAdminNameLists();
 }
 
 function renderCats(){
@@ -276,6 +282,88 @@ async function logBuchung(anzahl, typ){
   const ok = await sendAction({ name: currentName, menge: anzahl, typ: typ });
   if(ok){
     showCats();
+  }
+}
+
+// ====== ADMIN: Nameslisten rendern ======
+function renderAdminNameLists(){
+  const allePersonen = [...cfg.haus, ...cfg.nonloci];
+
+  // Zahlung
+  const zahlungList = document.getElementById("zahlungNameList");
+  if(zahlungList){
+    zahlungList.innerHTML = "";
+    allePersonen.forEach(name => {
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.onclick = () => selectAdminName("zahlung", name, b);
+      zahlungList.appendChild(b);
+    });
+  }
+
+  // Strafe
+  const strafeList = document.getElementById("strafeNameList");
+  if(strafeList){
+    strafeList.innerHTML = "";
+    allePersonen.forEach(name => {
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.onclick = () => selectAdminName("strafe", name, b);
+      strafeList.appendChild(b);
+    });
+  }
+}
+
+function selectAdminName(typ, name, btn){
+  const listId = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
+  const badgeId = typ === "zahlung" ? "zahlungSelectedBadge" : "strafeSelectedBadge";
+
+  // Alle Buttons in dieser Liste deselektieren
+  document.getElementById(listId).querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+  btn.classList.add("selected");
+
+  // Badge aktualisieren
+  const badge = document.getElementById(badgeId);
+  badge.textContent = "✓ " + name;
+  badge.classList.remove("hidden");
+
+  if(typ === "zahlung") zahlungSelectedName = name;
+  else strafeSelectedName = name;
+}
+
+async function doZahlung(){
+  if(!zahlungSelectedName){ toast("Bitte zuerst eine Person auswählen."); return; }
+  const betragRaw = document.getElementById("zahlungBetrag").value.replace(",",".");
+  const betrag = parseFloat(betragRaw);
+  if(!betrag || betrag <= 0){ toast("Bitte einen gültigen Betrag eingeben."); return; }
+  if(!navigator.onLine){ toast("Kein Netz – Zahlung nicht möglich."); return; }
+  const ok = await sendAction({ action:"zahlung", name: zahlungSelectedName, betrag: betrag });
+  if(ok){
+    document.getElementById("zahlungBetrag").value = "";
+    // Auswahl zurücksetzen
+    document.getElementById("zahlungNameList").querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+    document.getElementById("zahlungSelectedBadge").classList.add("hidden");
+    zahlungSelectedName = null;
+  }
+}
+
+async function doStrafe(){
+  if(!strafeSelectedName){ toast("Bitte zuerst eine Person auswählen."); return; }
+  const betragRaw = document.getElementById("strafeBetrag").value.replace(",",".");
+  const betrag = parseFloat(betragRaw);
+  if(!betrag || betrag <= 0){ toast("Bitte einen gültigen Betrag eingeben."); return; }
+  const grund = document.getElementById("strafeGrund").value.trim();
+  if(!navigator.onLine){ toast("Kein Netz – Strafe nicht möglich."); return; }
+  // GAS erwartet: action=strafe, name=..., betrag=..., grund=... (optional)
+  const params = { action:"strafe", name: strafeSelectedName, betrag: betrag };
+  if(grund) params.grund = grund;
+  const ok = await sendAction(params);
+  if(ok){
+    document.getElementById("strafeBetrag").value = "";
+    document.getElementById("strafeGrund").value = "";
+    document.getElementById("strafeNameList").querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+    document.getElementById("strafeSelectedBadge").classList.add("hidden");
+    strafeSelectedName = null;
   }
 }
 
