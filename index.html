@@ -147,8 +147,8 @@
   /* ===== LAGER ===== */
   .lager-header-row{
     display:flex;
-    align-items:flex-start;
-    gap:0;
+    align-items:center;
+    gap:12px;
   }
   .lager-num-wrap{
     display:flex;
@@ -157,7 +157,7 @@
     flex:1;
   }
   .lager-big-num{
-    font-size:clamp(2.8rem,10vw,4.2rem);
+    font-size:clamp(2rem,8vw,3rem);
     font-weight:800;
     line-height:1;
     color:var(--accent2);
@@ -167,15 +167,15 @@
     color:var(--muted);
     font-weight:400;
   }
-  /* kleiner dezenter Reload-Button oben rechts neben der Zahl */
+  /* Reload-Button: gleiche Höhe wie .btn-ok / .btn-accent in input-row */
   .btn-icon-reload{
-    background:transparent;
+    background:var(--card2);
     border:1px solid var(--border);
-    border-radius:7px;
+    border-radius:10px;
     color:var(--muted);
-    font-size:0.85rem;
-    width:28px;
-    height:28px;
+    font-size:1.1rem;
+    width:48px;
+    height:48px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -183,7 +183,6 @@
     transition:.15s;
     flex-shrink:0;
     padding:0;
-    margin-top:2px;
   }
   .btn-icon-reload:active{border-color:var(--accent); color:var(--accent2); transform:scale(0.93);}
   .lager-timestamp{
@@ -286,7 +285,7 @@
   <!-- ===== TAB: ADMIN ===== -->
   <section id="view-admin" class="view hidden">
 
-    <!-- LAGER: große Zahl + kleiner dezenter Reload rechts oben -->
+    <!-- LAGER -->
     <div class="card">
       <h2>Lager</h2>
       <div class="lager-header-row">
