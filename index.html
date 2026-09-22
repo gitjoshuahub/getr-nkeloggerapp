@@ -45,19 +45,10 @@
   .btn-danger{background:var(--danger); color:#fff;}
   .btn-ok{background:var(--ok); color:#062; font-weight:600;}
   .btn-full{grid-column:1/-1; width:100%;}
-
-  /* Outline-Button: nur Rahmen, kein Hintergrund */
   .btn-outline{
-    background:transparent;
-    border:2px solid var(--accent);
-    color:var(--accent2);
-    font-weight:600;
+    background:transparent; border:2px solid var(--accent); color:var(--accent2); font-weight:600;
   }
-  .btn-outline:active{
-    background:var(--accent);
-    color:#fff;
-  }
-
+  .btn-outline:active{ background:var(--accent); color:#fff; }
   .name-list{display:flex; flex-wrap:wrap; gap:8px;}
   .name-list button{flex:1 1 auto; min-width:90px;}
   select, input{
@@ -75,7 +66,6 @@
   .queueBadge{
     background:var(--accent); color:#fff; border-radius:20px; padding:2px 8px; font-size:12px; margin-left:6px;
   }
-
   .tabbar{
     display:flex; gap:4px; background:var(--card); border-radius:12px; padding:4px;
     border:1px solid var(--border); margin-bottom:12px;
@@ -84,11 +74,9 @@
     flex:1; border-radius:8px; background:transparent; padding:10px 0; font-size:13px; color:var(--muted);
   }
   .tabbar button.active{color:#fff; background:var(--accent);}
-
   .hidden{display:none !important;}
   .back-row{margin-bottom:10px;}
   small.muted{color:var(--muted);}
-
   .grid.menge-grid{grid-template-columns:1fr; gap:14px;}
   .stepper-block{
     background:var(--card2); border-radius:12px; padding:14px; border:1px solid var(--border);
@@ -104,7 +92,6 @@
   .input-row{display:flex; gap:8px;}
   .input-row input{margin-bottom:0; flex:1;}
   .input-row button{flex:0 0 auto; white-space:nowrap;}
-
   .login-overlay{
     position:fixed; inset:0; background:var(--bg); z-index:2000;
     display:flex; align-items:center; justify-content:center; padding:20px;
@@ -126,8 +113,6 @@
     padding:6px; border-radius:8px; margin-bottom:12px; border:1px solid #5a2a2a;
   }
   .offline-banner.hidden{display:none;}
-
-  /* Stand-Tab Sub-Tabs */
   .subtabbar{
     display:flex; gap:4px; background:var(--card2); border-radius:10px; padding:3px;
     border:1px solid var(--border); margin-bottom:12px;
@@ -136,16 +121,8 @@
     flex:1; border-radius:7px; background:transparent; padding:8px 0; font-size:13px; color:var(--muted);
   }
   .subtabbar button.active{color:#fff; background:var(--accent);}
-
-  /* Ranglisten-Stil */
-  .rangliste-text{
-    white-space:pre-wrap; font-size:14px; margin-top:8px; line-height:1.7;
-  }
-  .cache-hint{
-    font-size:11px; color:var(--muted); margin-top:6px;
-  }
-
-  /* Admin Namensauswahl */
+  .rangliste-text{white-space:pre-wrap; font-size:14px; margin-top:8px; line-height:1.7;}
+  .cache-hint{font-size:11px; color:var(--muted); margin-top:6px;}
   .admin-name-list{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;}
   .admin-name-list button{flex:1 1 auto; min-width:80px; font-size:14px; padding:10px 8px;}
   .admin-name-list button.selected{background:var(--accent); color:#fff;}
@@ -154,6 +131,64 @@
     border-radius:8px; padding:4px 10px; font-size:13px; color:var(--accent2); margin-bottom:8px;
   }
   .selected-name-badge.hidden{display:none !important;}
+
+  /* ===== NAMENSLISTE: Timestamp unten ===== */
+  .namecard-footer{
+    margin-top:14px;
+    padding-top:8px;
+    border-top:1px solid var(--border);
+  }
+  .timestamp-hint{
+    font-size:11px;
+    color:var(--muted);
+    text-align:right;
+  }
+
+  /* ===== LAGER: Großer Bestand + Reload-Button ===== */
+  .lager-header-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:8px;
+  }
+  .lager-big-num{
+    font-size:clamp(2.8rem,10vw,4.2rem);
+    font-weight:800;
+    line-height:1;
+    color:var(--accent2);
+    min-width:2rem;
+  }
+  .lager-unit{
+    font-size:14px;
+    color:var(--muted);
+    font-weight:400;
+    margin-top:4px;
+  }
+  .btn-icon-reload{
+    background:var(--card2);
+    border:1px solid var(--border);
+    border-radius:10px;
+    color:var(--text);
+    font-size:1.3rem;
+    width:44px;
+    height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:.15s;
+    flex-shrink:0;
+    padding:0;
+  }
+  .btn-icon-reload:active{background:var(--accent); color:#fff; transform:scale(0.95);}
+  .lager-timestamp{
+    font-size:11px;
+    color:var(--muted);
+    text-align:right;
+    margin-top:6px;
+    padding-top:6px;
+    border-top:1px solid var(--border);
+  }
 </style>
 </head>
 <body>
@@ -203,6 +238,9 @@
       <div class="back-row"><button onclick="showCats()">⬅ Zurück</button></div>
       <h2 id="nameCardTitle">Wer?</h2>
       <div class="name-list" id="nameList"></div>
+      <div class="namecard-footer">
+        <div id="cfgTimestamp" class="timestamp-hint"></div>
+      </div>
     </div>
 
     <div class="card hidden" id="mengeCard">
@@ -211,7 +249,6 @@
       <div class="grid menge-grid" id="mengeGrid"></div>
     </div>
 
-    <!-- Storno-Karte im Buchen-Tab -->
     <div class="card" id="stornoCard">
       <h2>↩ Letzte Buchung stornieren</h2>
       <button class="btn-full btn-danger" onclick="doStorno()">Stornieren (5 Min. Frist)</button>
@@ -224,8 +261,6 @@
       <button id="subtab-abrechnung" class="active" onclick="switchStandTab('abrechnung')">Abrechnung</button>
       <button id="subtab-rangliste" onclick="switchStandTab('rangliste')">Rangliste</button>
     </div>
-
-    <!-- Abrechnung (action=stand) -->
     <div id="subview-abrechnung">
       <div class="card">
         <h2>Aktueller Abrechnungsstand</h2>
@@ -234,8 +269,6 @@
         <div id="standCacheHint" class="cache-hint"></div>
       </div>
     </div>
-
-    <!-- Rangliste (action=semester) -->
     <div id="subview-rangliste" class="hidden">
       <div class="card">
         <h2>🏆 Rangliste</h2>
@@ -249,10 +282,17 @@
   <!-- ===== TAB: ADMIN ===== -->
   <section id="view-admin" class="view hidden">
 
+    <!-- LAGER: großer Bestand + Reload rechts daneben -->
     <div class="card">
       <h2>Lager</h2>
-      <button class="btn-full" onclick="loadLager()">Lagerstand anzeigen</button>
-      <div id="lagerResult" style="margin-top:12px; white-space:pre-wrap; font-size:14px;"></div>
+      <div class="lager-header-row">
+        <div>
+          <div id="lagerBestandNum" class="lager-big-num">–</div>
+          <div class="lager-unit">Flaschen</div>
+        </div>
+        <button class="btn-icon-reload" onclick="loadLager()" title="Aktualisieren">↻</button>
+      </div>
+      <div class="lager-timestamp" id="lagerTimestamp"></div>
     </div>
 
     <div class="card">

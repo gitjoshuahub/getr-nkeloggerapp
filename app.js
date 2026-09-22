@@ -17,6 +17,8 @@ let kistenWert = 1;
 const FLASCHEN_MAX = 19;
 const KISTEN_MAX = 5;
 const SESSION_KEY = "bier_session";
+const CFG_CACHE_KEY = "bier_cfg";
+const LAGER_CACHE_KEY = "bier_lager_cache";
 
 // Admin-Auswahl State
 let zahlungSelectedName = null;
@@ -76,10 +78,13 @@ function enterApp(session){
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
   renderCats();
   updateStatus();
-  fetchConfig();
+  // Cache sofort laden, dann im Hintergrund aktualisieren
+  loadCachedConfig();
+  fetchConfig(true);
   updateQueueBadge();
   restoreCachedStand();
   restoreCachedRangliste();
+  restoreCachedLager();
 }
 
 function doLogout(){ clearSession(); location.reload(); }
@@ -173,24 +178,48 @@ function toast(msg){
   toastTimer = setTimeout(()=>t.classList.remove("show"), 2500);
 }
 
-async function fetchConfig(){
-  if(!navigator.onLine){
-    const cached = localStorage.getItem("bier_cfg");
-    if(cached) cfg = JSON.parse(cached);
+// ====== TIMESTAMP HELPER ======
+function formatCacheTime(tsStr){
+  if(!tsStr) return "";
+  const d = new Date(parseInt(tsStr));
+  if(isNaN(d)) return "";
+  return d.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+}
+
+// ====== CONFIG: stale-while-revalidate ======
+function loadCachedConfig(){
+  try{
+    const raw = localStorage.getItem(CFG_CACHE_KEY);
+    if(!raw) return false;
+    const data = JSON.parse(raw);
+    cfg.haus    = Array.isArray(data.haus)    ? data.haus    : [];
+    cfg.nonloci = Array.isArray(data.nonloci) ? data.nonloci : [];
+    const tsEl = document.getElementById("cfgTimestamp");
+    if(tsEl && data.ts) tsEl.textContent = "Zuletzt aktualisiert: " + formatCacheTime(data.ts.toString()) + " Uhr";
     renderAdminNameLists();
+    return true;
+  }catch(e){ return false; }
+}
+
+async function fetchConfig(background = false){
+  if(!navigator.onLine){
+    loadCachedConfig();
     return;
   }
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"getconfig"}));
+    const res = await fetchWithTimeout(buildUrl({action:"getconfig"}), 10000);
     const data = await res.json();
-    cfg.haus = data.haus || [];
-    cfg.nonloci = data.nonloci || [];
-    localStorage.setItem("bier_cfg", JSON.stringify(cfg));
+    cfg.haus    = Array.isArray(data.haus)    ? data.haus    : [];
+    cfg.nonloci = Array.isArray(data.nonloci) ? data.nonloci : [];
+    const now = Date.now();
+    localStorage.setItem(CFG_CACHE_KEY, JSON.stringify({ haus: cfg.haus, nonloci: cfg.nonloci, ts: now }));
+    const tsEl = document.getElementById("cfgTimestamp");
+    if(tsEl) tsEl.textContent = "Zuletzt aktualisiert: " + formatCacheTime(now.toString()) + " Uhr";
+    renderAdminNameLists();
+    if(currentKat && currentKat.hasNameList) showNames();
   }catch(e){
-    const cached = localStorage.getItem("bier_cfg");
-    if(cached) cfg = JSON.parse(cached);
+    if(!background) loadCachedConfig();
   }
-  renderAdminNameLists();
 }
 
 function renderCats(){
@@ -199,17 +228,8 @@ function renderCats(){
   KATEGORIEN.forEach((k, idx)=>{
     const b = document.createElement("button");
     b.textContent = k.label;
-    // Haus & Non Loci: ausgefüllt (btn-accent)
-    // Philister, Institut, Couleur: nur Rahmen (btn-outline)
-    if(k.hasNameList){
-      b.className = "btn-accent";
-    } else {
-      b.className = "btn-outline";
-    }
-    // Couleur nimmt zwei Spalten ein
-    if(k.fullWidth){
-      b.style.gridColumn = "1 / -1";
-    }
+    if(k.hasNameList){ b.className = "btn-accent"; } else { b.className = "btn-outline"; }
+    if(k.fullWidth){ b.style.gridColumn = "1 / -1"; }
     b.onclick = ()=> selectCat(idx);
     grid.appendChild(b);
   });
@@ -224,7 +244,6 @@ function showCats(){
   document.getElementById("catCard").classList.remove("hidden");
   document.getElementById("nameCard").classList.add("hidden");
   document.getElementById("mengeCard").classList.add("hidden");
-  // Storno-Karte immer sichtbar
   document.getElementById("stornoCard").classList.remove("hidden");
 }
 
@@ -237,12 +256,24 @@ function showNames(){
   const list = currentKat.listKey === "haus" ? cfg.haus : cfg.nonloci;
   const wrap = document.getElementById("nameList");
   wrap.innerHTML = "";
-  list.forEach(name=>{
-    const b = document.createElement("button");
-    b.textContent = name;
-    b.onclick = ()=>{ currentName = name; showMenge(); };
-    wrap.appendChild(b);
-  });
+  if(!list || list.length === 0){
+    wrap.innerHTML = "<p style='color:var(--muted);font-size:.85rem;padding:.5rem 0'>Keine Namen im Cache – wird geladen…</p>";
+  } else {
+    list.forEach(name=>{
+      const b = document.createElement("button");
+      b.textContent = name;
+      b.onclick = ()=>{ currentName = name; showMenge(); };
+      wrap.appendChild(b);
+    });
+  }
+  // Timestamp aus Cache ins Footer
+  const tsEl = document.getElementById("cfgTimestamp");
+  if(tsEl && !tsEl.textContent){
+    try{
+      const raw = localStorage.getItem(CFG_CACHE_KEY);
+      if(raw){ const d = JSON.parse(raw); if(d.ts) tsEl.textContent = "Zuletzt aktualisiert: " + formatCacheTime(d.ts.toString()) + " Uhr"; }
+    }catch(e){}
+  }
 }
 
 function showMenge(){
@@ -258,21 +289,17 @@ function showMenge(){
 function renderMengeSteppers(){
   const grid = document.getElementById("mengeGrid");
   grid.innerHTML = "";
-
   const flWrap = document.createElement("div");
   flWrap.className = "stepper-block";
   const flLabel = document.createElement("div");
-  flLabel.className = "stepper-label";
-  flLabel.textContent = "Flaschen";
+  flLabel.className = "stepper-label"; flLabel.textContent = "Flaschen";
   flWrap.appendChild(flLabel);
   flWrap.appendChild(buildAnzahlGrid(FLASCHEN_MAX, "flasche"));
   grid.appendChild(flWrap);
-
   const kiWrap = document.createElement("div");
   kiWrap.className = "stepper-block";
   const kiLabel = document.createElement("div");
-  kiLabel.className = "stepper-label";
-  kiLabel.textContent = "Kästen";
+  kiLabel.className = "stepper-label"; kiLabel.textContent = "Kästen";
   kiWrap.appendChild(kiLabel);
   kiWrap.appendChild(buildAnzahlGrid(KISTEN_MAX, "kasten"));
   grid.appendChild(kiWrap);
@@ -283,8 +310,7 @@ function buildAnzahlGrid(max, typ){
   wrap.className = "anzahl-grid";
   for(let i = 1; i <= max; i++){
     const b = document.createElement("button");
-    b.textContent = i;
-    b.className = "anzahl-btn";
+    b.textContent = i; b.className = "anzahl-btn";
     b.onclick = () => logBuchung(i, typ);
     wrap.appendChild(b);
   }
@@ -300,35 +326,25 @@ async function logBuchung(anzahl, typ){
   if(ok){ showCats(); }
 }
 
-// ====== ADMIN: Nameslisten rendern ======
+// ====== ADMIN: Namenslisten ======
 function renderAdminNameLists(){
   const allePersonen = [...cfg.haus, ...cfg.nonloci];
-
-  const zahlungList = document.getElementById("zahlungNameList");
-  if(zahlungList){
-    zahlungList.innerHTML = "";
+  ["zahlungNameList","strafeNameList"].forEach(listId => {
+    const el = document.getElementById(listId);
+    if(!el) return;
+    el.innerHTML = "";
+    const typ = listId.startsWith("zahlung") ? "zahlung" : "strafe";
     allePersonen.forEach(name => {
       const b = document.createElement("button");
       b.textContent = name;
-      b.onclick = () => selectAdminName("zahlung", name, b);
-      zahlungList.appendChild(b);
+      b.onclick = () => selectAdminName(typ, name, b);
+      el.appendChild(b);
     });
-  }
-
-  const strafeList = document.getElementById("strafeNameList");
-  if(strafeList){
-    strafeList.innerHTML = "";
-    allePersonen.forEach(name => {
-      const b = document.createElement("button");
-      b.textContent = name;
-      b.onclick = () => selectAdminName("strafe", name, b);
-      strafeList.appendChild(b);
-    });
-  }
+  });
 }
 
 function selectAdminName(typ, name, btn){
-  const listId = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
+  const listId  = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
   const badgeId = typ === "zahlung" ? "zahlungSelectedBadge" : "strafeSelectedBadge";
   document.getElementById(listId).querySelectorAll("button").forEach(b => b.classList.remove("selected"));
   btn.classList.add("selected");
@@ -373,18 +389,11 @@ async function doStrafe(){
   }
 }
 
-// ====== STAND-TAB: Sub-Tabs ======
-const STAND_CACHE_KEY = "bier_stand_cache";
-const STAND_CACHE_TIME_KEY = "bier_stand_cache_time";
-const RANGLISTE_CACHE_KEY = "bier_rangliste_cache";
+// ====== STAND-TAB ======
+const STAND_CACHE_KEY          = "bier_stand_cache";
+const STAND_CACHE_TIME_KEY     = "bier_stand_cache_time";
+const RANGLISTE_CACHE_KEY      = "bier_rangliste_cache";
 const RANGLISTE_CACHE_TIME_KEY = "bier_rangliste_cache_time";
-
-function formatCacheTime(tsStr){
-  if(!tsStr) return "";
-  const d = new Date(parseInt(tsStr));
-  if(isNaN(d)) return "";
-  return d.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
-}
 
 function switchStandTab(tab){
   ["abrechnung","rangliste"].forEach(t=>{
@@ -395,9 +404,9 @@ function switchStandTab(tab){
 
 function restoreCachedStand(){
   const cached = localStorage.getItem(STAND_CACHE_KEY);
-  const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
-  const div = document.getElementById("standResult");
-  const hint = document.getElementById("standCacheHint");
+  const ts     = localStorage.getItem(STAND_CACHE_TIME_KEY);
+  const div    = document.getElementById("standResult");
+  const hint   = document.getElementById("standCacheHint");
   if(cached && div){
     div.textContent = cached;
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(ts);
@@ -406,9 +415,9 @@ function restoreCachedStand(){
 
 function restoreCachedRangliste(){
   const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
-  const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
-  const div = document.getElementById("ranglisteResult");
-  const hint = document.getElementById("ranglisteCacheHint");
+  const ts     = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+  const div    = document.getElementById("ranglisteResult");
+  const hint   = document.getElementById("ranglisteCacheHint");
   if(cached && div){
     div.textContent = cached;
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(ts);
@@ -416,13 +425,12 @@ function restoreCachedRangliste(){
 }
 
 async function loadStand(){
-  const div = document.getElementById("standResult");
+  const div  = document.getElementById("standResult");
   const hint = document.getElementById("standCacheHint");
-  div.textContent = "Lade...";
-  hint.textContent = "";
+  div.textContent = "Lade..."; hint.textContent = "";
   if(!navigator.onLine){
     const cached = localStorage.getItem(STAND_CACHE_KEY);
-    const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
+    const ts     = localStorage.getItem(STAND_CACHE_TIME_KEY);
     div.textContent = cached || "Kein Netz und kein gespeicherter Stand vorhanden.";
     if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
     return;
@@ -439,7 +447,7 @@ async function loadStand(){
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(now);
   }catch(e){
     const cached = localStorage.getItem(STAND_CACHE_KEY);
-    const ts = localStorage.getItem(STAND_CACHE_TIME_KEY);
+    const ts     = localStorage.getItem(STAND_CACHE_TIME_KEY);
     div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung." : "Fehler beim Laden.") +
       (cached ? "\n\n" + cached : "");
     if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
@@ -447,19 +455,17 @@ async function loadStand(){
 }
 
 async function loadRangliste(){
-  const div = document.getElementById("ranglisteResult");
+  const div  = document.getElementById("ranglisteResult");
   const hint = document.getElementById("ranglisteCacheHint");
-  div.textContent = "Lade... (kann bis zu 45 Sek. dauern)";
-  hint.textContent = "";
+  div.textContent = "Lade... (kann bis zu 45 Sek. dauern)"; hint.textContent = "";
   if(!navigator.onLine){
     const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
-    const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+    const ts     = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
     div.textContent = cached || "Kein Netz und keine gespeicherte Rangliste vorhanden.";
     if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
     return;
   }
   try{
-    // Rangliste braucht länger – Timeout auf 45s erhöht
     const res = await fetchWithTimeout(buildUrl({action:"semester"}), 45000);
     if(!res.ok){ div.textContent = "Serverfehler (HTTP " + res.status + ")."; return; }
     const text = await res.text();
@@ -471,7 +477,7 @@ async function loadRangliste(){
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(now);
   }catch(e){
     const cached = localStorage.getItem(RANGLISTE_CACHE_KEY);
-    const ts = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
+    const ts     = localStorage.getItem(RANGLISTE_CACHE_TIME_KEY);
     div.textContent = (e.name==="AbortError" ? "Zeitüberschreitung – Server zu langsam." : "Fehler beim Laden.") +
       (cached ? "\n\nZuletzt gespeichert:\n" + cached : "");
     if(cached && hint) hint.textContent = "Offline – zuletzt geladen: " + formatCacheTime(ts);
@@ -486,15 +492,40 @@ async function doStorno(){
   }catch(e){ toast("Kein Netz -- Storno nicht möglich."); }
 }
 
-async function loadLager(){
-  const div = document.getElementById("lagerResult");
-  div.textContent = "Lade...";
-  if(!navigator.onLine){ div.textContent = "Kein Netz – nicht abrufbar."; return; }
+// ====== LAGER: großer Display + Timestamp + Cache ======
+function restoreCachedLager(){
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"getlager"}));
+    const raw = localStorage.getItem(LAGER_CACHE_KEY);
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    const numEl = document.getElementById("lagerBestandNum");
+    const tsEl  = document.getElementById("lagerTimestamp");
+    if(numEl) numEl.textContent = data.bestand ?? "–";
+    if(tsEl && data.ts) tsEl.textContent = "Cache: " + formatCacheTime(data.ts.toString()) + " Uhr";
+  }catch(e){}
+}
+
+async function loadLager(){
+  const numEl = document.getElementById("lagerBestandNum");
+  const tsEl  = document.getElementById("lagerTimestamp");
+  if(numEl) numEl.textContent = "…";
+  if(tsEl)  tsEl.textContent  = "Lädt…";
+  if(!navigator.onLine){
+    restoreCachedLager();
+    if(tsEl) tsEl.textContent += " (offline)";
+    return;
+  }
+  try{
+    const res  = await fetchWithTimeout(buildUrl({action:"getlager"}), 15000);
     const data = await res.json();
-    div.textContent = "Gesamtbestand: " + data.bestand + " Flaschen";
-  }catch(e){ div.textContent = "Kein Netz – nicht abrufbar."; }
+    const now  = Date.now();
+    localStorage.setItem(LAGER_CACHE_KEY, JSON.stringify({ bestand: data.bestand, ts: now }));
+    if(numEl) numEl.textContent = data.bestand ?? "–";
+    if(tsEl)  tsEl.textContent  = "Aktualisiert: " + formatCacheTime(now.toString()) + " Uhr";
+  }catch(e){
+    restoreCachedLager();
+    if(tsEl) tsEl.textContent += " (Fehler – Cache)";
+  }
 }
 
 async function doEinkauf(){
@@ -514,6 +545,8 @@ function switchTab(tab){
     document.getElementById("view-"+t).classList.toggle("hidden", t!==tab);
     document.getElementById("tab-"+t).classList.toggle("active", t===tab);
   });
+  // Beim Wechsel zu Admin: Lager sofort laden
+  if(tab === "admin") loadLager();
 }
 
 checkSessionOnLoad();
