@@ -144,34 +144,38 @@
     text-align:right;
   }
 
-  /* ===== LAGER: Großer Bestand + Reload-Button ===== */
+  /* ===== LAGER ===== */
   .lager-header-row{
     display:flex;
-    align-items:center;
-    gap:12px;
-    margin-bottom:8px;
+    align-items:flex-start;
+    gap:0;
+  }
+  .lager-num-wrap{
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+    flex:1;
   }
   .lager-big-num{
     font-size:clamp(2.8rem,10vw,4.2rem);
     font-weight:800;
     line-height:1;
     color:var(--accent2);
-    min-width:2rem;
   }
   .lager-unit{
     font-size:14px;
     color:var(--muted);
     font-weight:400;
-    margin-top:4px;
   }
+  /* kleiner dezenter Reload-Button oben rechts neben der Zahl */
   .btn-icon-reload{
-    background:var(--card2);
+    background:transparent;
     border:1px solid var(--border);
-    border-radius:10px;
-    color:var(--text);
-    font-size:1.3rem;
-    width:44px;
-    height:44px;
+    border-radius:7px;
+    color:var(--muted);
+    font-size:0.85rem;
+    width:28px;
+    height:28px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -179,12 +183,12 @@
     transition:.15s;
     flex-shrink:0;
     padding:0;
+    margin-top:2px;
   }
-  .btn-icon-reload:active{background:var(--accent); color:#fff; transform:scale(0.95);}
+  .btn-icon-reload:active{border-color:var(--accent); color:var(--accent2); transform:scale(0.93);}
   .lager-timestamp{
     font-size:11px;
     color:var(--muted);
-    text-align:right;
     margin-top:6px;
     padding-top:6px;
     border-top:1px solid var(--border);
@@ -282,11 +286,11 @@
   <!-- ===== TAB: ADMIN ===== -->
   <section id="view-admin" class="view hidden">
 
-    <!-- LAGER: großer Bestand + Reload rechts daneben -->
+    <!-- LAGER: große Zahl + kleiner dezenter Reload rechts oben -->
     <div class="card">
       <h2>Lager</h2>
       <div class="lager-header-row">
-        <div>
+        <div class="lager-num-wrap">
           <div id="lagerBestandNum" class="lager-big-num">–</div>
           <div class="lager-unit">Flaschen</div>
         </div>
