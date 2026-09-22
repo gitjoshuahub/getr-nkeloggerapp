@@ -78,7 +78,6 @@ function enterApp(session){
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
   renderCats();
   updateStatus();
-  // Cache sofort laden, dann im Hintergrund aktualisieren
   loadCachedConfig();
   fetchConfig(true);
   updateQueueBadge();
@@ -266,7 +265,6 @@ function showNames(){
       wrap.appendChild(b);
     });
   }
-  // Timestamp aus Cache ins Footer
   const tsEl = document.getElementById("cfgTimestamp");
   if(tsEl && !tsEl.textContent){
     try{
@@ -344,13 +342,9 @@ function renderAdminNameLists(){
 }
 
 function selectAdminName(typ, name, btn){
-  const listId  = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
-  const badgeId = typ === "zahlung" ? "zahlungSelectedBadge" : "strafeSelectedBadge";
+  const listId = typ === "zahlung" ? "zahlungNameList" : "strafeNameList";
   document.getElementById(listId).querySelectorAll("button").forEach(b => b.classList.remove("selected"));
   btn.classList.add("selected");
-  const badge = document.getElementById(badgeId);
-  badge.textContent = "✓ " + name;
-  badge.classList.remove("hidden");
   if(typ === "zahlung") zahlungSelectedName = name;
   else strafeSelectedName = name;
 }
@@ -365,7 +359,6 @@ async function doZahlung(){
   if(ok){
     document.getElementById("zahlungBetrag").value = "";
     document.getElementById("zahlungNameList").querySelectorAll("button").forEach(b => b.classList.remove("selected"));
-    document.getElementById("zahlungSelectedBadge").classList.add("hidden");
     zahlungSelectedName = null;
   }
 }
@@ -384,7 +377,6 @@ async function doStrafe(){
     document.getElementById("strafeBetrag").value = "";
     document.getElementById("strafeGrund").value = "";
     document.getElementById("strafeNameList").querySelectorAll("button").forEach(b => b.classList.remove("selected"));
-    document.getElementById("strafeSelectedBadge").classList.add("hidden");
     strafeSelectedName = null;
   }
 }
@@ -492,7 +484,7 @@ async function doStorno(){
   }catch(e){ toast("Kein Netz -- Storno nicht möglich."); }
 }
 
-// ====== LAGER: großer Display + Timestamp + Cache ======
+// ====== LAGER ======
 function restoreCachedLager(){
   try{
     const raw = localStorage.getItem(LAGER_CACHE_KEY);
@@ -545,7 +537,6 @@ function switchTab(tab){
     document.getElementById("view-"+t).classList.toggle("hidden", t!==tab);
     document.getElementById("tab-"+t).classList.toggle("active", t===tab);
   });
-  // Beim Wechsel zu Admin: Lager sofort laden
   if(tab === "admin") loadLager();
 }
 
