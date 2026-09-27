@@ -20,7 +20,6 @@ const SESSION_KEY = "bier_session";
 const CFG_CACHE_KEY = "bier_cfg";
 const LAGER_CACHE_KEY = "bier_lager_cache";
 
-// Admin-Auswahl State
 let zahlungSelectedName = null;
 let strafeSelectedName = null;
 
@@ -84,6 +83,7 @@ function enterApp(session){
   restoreCachedStand();
   restoreCachedRangliste();
   restoreCachedLager();
+  loadLager();
 }
 
 function doLogout(){ clearSession(); location.reload(); }
@@ -130,7 +130,7 @@ function fetchWithTimeout(url, ms = 15000){
 
 async function rawGet(params, silent){
   try{
-    const res = await fetchWithTimeout(buildUrl(params));
+    const res = await fetch(buildUrl(params), { method:"GET" });
     if(!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
     if(!silent) toast(text);
@@ -155,7 +155,11 @@ async function sendAction(params){
     toast(text || "Gebucht!");
     return true;
   }catch(e){
-    toast("Fehler – Buchung wurde NICHT gespeichert. Bitte erneut versuchen.");
+    if(e.name === "AbortError"){
+      toast("⏰ Zeitüberschreitung – Aktion wurde evtl. trotzdem gespeichert. Bitte prüfen!");
+    } else {
+      toast("⚠️ Verbindungsfehler – Aktion wurde evtl. trotzdem gespeichert. Bitte prüfen!");
+    }
     return false;
   } finally {
     sendingInProgress = false;
@@ -177,7 +181,6 @@ function toast(msg){
   toastTimer = setTimeout(()=>t.classList.remove("show"), 2500);
 }
 
-// ====== TIMESTAMP HELPER ======
 function formatCacheTime(tsStr){
   if(!tsStr) return "";
   const d = new Date(parseInt(tsStr));
@@ -185,7 +188,6 @@ function formatCacheTime(tsStr){
   return d.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
 }
 
-// ====== CONFIG: stale-while-revalidate ======
 function loadCachedConfig(){
   try{
     const raw = localStorage.getItem(CFG_CACHE_KEY);
@@ -324,7 +326,6 @@ async function logBuchung(anzahl, typ){
   if(ok){ showCats(); }
 }
 
-// ====== ADMIN: Namenslisten ======
 function renderAdminNameLists(){
   const allePersonen = [...cfg.haus, ...cfg.nonloci];
   ["zahlungNameList","strafeNameList"].forEach(listId => {
@@ -381,7 +382,6 @@ async function doStrafe(){
   }
 }
 
-// ====== STAND-TAB ======
 const STAND_CACHE_KEY          = "bier_stand_cache";
 const STAND_CACHE_TIME_KEY     = "bier_stand_cache_time";
 const RANGLISTE_CACHE_KEY      = "bier_rangliste_cache";
@@ -479,12 +479,20 @@ async function loadRangliste(){
 async function doStorno(){
   if(!navigator.onLine){ toast("Kein Netz -- Storno nicht möglich."); return; }
   try{
-    const res = await fetchWithTimeout(buildUrl({action:"storno"}));
-    toast(await res.text());
-  }catch(e){ toast("Kein Netz -- Storno nicht möglich."); }
+    const res = await fetchWithTimeout(buildUrl({action:"storno"}), 15000);
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
+    // Exakt die Text-Rückmeldung des GAS-Backends anzeigen (z.B. "Storno erfolgt!" oder "Storno nicht möglich.")
+    toast(text || "Storno verarbeitet.");
+  }catch(e){
+    if(e.name === "AbortError"){
+      toast("⏰ Zeitüberschreitung – Storno wurde evtl. trotzdem ausgeführt. Bitte Stand prüfen!");
+    } else {
+      toast("⚠️ Verbindungsfehler beim Storno – bitte Stand prüfen, es könnte trotzdem geklappt haben.");
+    }
+  }
 }
 
-// ====== LAGER ======
 function restoreCachedLager(){
   try{
     const raw = localStorage.getItem(LAGER_CACHE_KEY);
@@ -537,7 +545,7 @@ function switchTab(tab){
     document.getElementById("view-"+t).classList.toggle("hidden", t!==tab);
     document.getElementById("tab-"+t).classList.toggle("active", t===tab);
   });
-  if(tab === "admin") loadLager();
+  if(tab === "admin") restoreCachedLager();
 }
 
 checkSessionOnLoad();
