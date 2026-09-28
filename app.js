@@ -1,6 +1,6 @@
 // ====== KONFIGURATION ======
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfx9LSz3QW-pfn5TRkc8QvWIt025rIiKz2QrJLukZ4XytuYaCnAxZSLHBKj9gWLAnj/exec";
-const HAUS_SCRIPT_URL = ""; // <- hier später die Hausorga-Web-App-URL eintragen
+const HAUS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzypbqWCy5OsSqblD3KEsqK0RvfxqHnkw2hk_A94IO4ekGP5epvGouAJUwb4iZqr78/exec";
 const API_KEY = "bier123";
 const KATEGORIEN = [
   { label: "Haus", hasNameList: true, listKey: "haus" },
@@ -149,11 +149,6 @@ async function loadKalender(){
     return;
   }
 
-  if(!HAUS_SCRIPT_URL){
-    liste.innerHTML = '<div class="kal-empty">ℹ️ Kalender noch nicht konfiguriert.<br><small>HAUS_SCRIPT_URL in app.js eintragen.</small></div>';
-    return;
-  }
-
   try{
     const url = new URL(HAUS_SCRIPT_URL);
     url.searchParams.set("action", "getevents");
@@ -225,8 +220,6 @@ async function setAttendance(ev, status, btn){
     toast("Offline – Status wird beim nächsten Sync gespeichert");
     return;
   }
-
-  if(!HAUS_SCRIPT_URL){ toast("Kalender-URL noch nicht konfiguriert."); return; }
 
   try{
     const url = new URL(HAUS_SCRIPT_URL);
