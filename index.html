@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>KoeWi Bierlogger</title>
+<title>KoeWi App</title>
 <meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -14,14 +14,18 @@
   :root{
     --bg:#000000; --card:#111111; --card2:#1a1a1a;
     --accent:#e5383b; --accent2:#ff5a5f;
+    --accent-kal:#3a86ff; --accent-kal2:#6aa3ff;
+    --accent-haus:#3ecf6e; --accent-haus2:#5de08a;
     --text:#f2f2f2; --muted:#8a8a8a; --danger:#e5383b; --ok:#3ecf6e;
     --border:#222222;
+    --nav-h: 64px;
   }
   *{box-sizing:border-box;}
   body{
     margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     background:var(--bg); color:var(--text); min-height:100vh;
     display:flex; flex-direction:column;
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
   }
   header{
     padding:12px 16px 0 16px; background:var(--bg); position:sticky; top:0; z-index:10;
@@ -49,6 +53,8 @@
     background:transparent; border:2px solid var(--accent); color:var(--accent2); font-weight:600;
   }
   .btn-outline:active{ background:var(--accent); color:#fff; }
+  .btn-kal{background:var(--accent-kal); color:#fff; font-weight:600;}
+  .btn-haus{background:var(--accent-haus); color:#062; font-weight:600;}
   .name-list{display:flex; flex-wrap:wrap; gap:8px;}
   .name-list button{flex:1 1 auto; min-width:90px;}
   select, input{
@@ -57,15 +63,12 @@
   }
   h2{font-size:15px; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.5px;}
   #toast{
-    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    position:fixed; bottom:calc(var(--nav-h) + 12px + env(safe-area-inset-bottom, 0px)); left:50%; transform:translateX(-50%);
     background:#1a1a1a; color:#fff; padding:12px 20px; border-radius:10px;
     opacity:0; transition:.3s; pointer-events:none; max-width:90%; text-align:center; z-index:999;
     border:1px solid var(--border);
   }
   #toast.show{opacity:1;}
-  .queueBadge{
-    background:var(--accent); color:#fff; border-radius:20px; padding:2px 8px; font-size:12px; margin-left:6px;
-  }
   .tabbar{
     display:flex; gap:4px; background:var(--card); border-radius:12px; padding:4px;
     border:1px solid var(--border); margin-bottom:12px;
@@ -131,8 +134,6 @@
     border-radius:8px; padding:4px 10px; font-size:13px; color:var(--accent2); margin-bottom:8px;
   }
   .selected-name-badge.hidden{display:none !important;}
-
-  /* ===== NAMENSLISTE: Timestamp unten ===== */
   .namecard-footer{
     margin-top:14px;
     padding-top:8px;
@@ -143,8 +144,6 @@
     color:var(--muted);
     text-align:right;
   }
-
-  /* ===== LAGER ===== */
   .lager-header-row{
     display:flex;
     align-items:center;
@@ -167,7 +166,6 @@
     color:var(--muted);
     font-weight:400;
   }
-  /* Reload-Button: gleiche Höhe wie .btn-ok / .btn-accent in input-row */
   .btn-icon-reload{
     background:var(--card2);
     border:1px solid var(--border);
@@ -192,13 +190,129 @@
     padding-top:6px;
     border-top:1px solid var(--border);
   }
+
+  /* ===== BOTTOM NAV ===== */
+  .bottom-nav{
+    position:fixed;
+    bottom:0; left:0; right:0;
+    height:calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+    background:var(--card);
+    border-top:1px solid var(--border);
+    display:flex;
+    z-index:100;
+    padding-bottom:env(safe-area-inset-bottom, 0px);
+  }
+  .bottom-nav button{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+    border-radius:0;
+    background:transparent;
+    color:var(--muted);
+    font-size:11px;
+    padding:8px 0 4px;
+    border:none;
+    transition:.15s;
+  }
+  .bottom-nav button .nav-icon{font-size:22px; line-height:1;}
+  .bottom-nav button.active-getraenke{color:var(--accent2);}
+  .bottom-nav button.active-kalender{color:var(--accent-kal2);}
+  .bottom-nav button.active-haus{color:var(--accent-haus2);}
+
+  /* ===== KALENDER ===== */
+  .kal-subtabbar{
+    display:flex; gap:4px; background:var(--card2); border-radius:10px; padding:3px;
+    border:1px solid var(--border); margin-bottom:12px;
+  }
+  .kal-subtabbar button{
+    flex:1; border-radius:7px; background:transparent; padding:8px 0; font-size:13px; color:var(--muted);
+  }
+  .kal-subtabbar button.active{color:#fff; background:var(--accent-kal);}
+
+  .event-card{
+    background:var(--card2);
+    border-radius:12px;
+    padding:14px;
+    margin-bottom:10px;
+    border:1px solid var(--border);
+  }
+  .event-card h3{
+    font-size:15px;
+    font-weight:700;
+    margin:0 0 4px;
+    color:var(--text);
+  }
+  .event-card .event-meta{
+    font-size:12px;
+    color:var(--muted);
+    margin-bottom:10px;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .event-card .event-actions{
+    display:flex;
+    gap:6px;
+  }
+  .event-card .event-actions button{
+    flex:1;
+    font-size:13px;
+    padding:9px 4px;
+    border-radius:8px;
+    background:var(--card);
+    color:var(--text);
+    border:1px solid var(--border);
+  }
+  .event-card .event-actions button.status-dabei{
+    background:var(--ok); color:#062; border-color:var(--ok); font-weight:700;
+  }
+  .event-card .event-actions button.status-vielleicht{
+    background:#665500; color:#ffd; border-color:#998800; font-weight:700;
+  }
+  .event-card .event-actions button.status-abgesagt{
+    background:#4a1010; color:#fbb; border-color:#7a2020; font-weight:700;
+  }
+  .event-teilnehmer{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--muted);
+    border-top:1px solid var(--border);
+    padding-top:6px;
+  }
+  .kal-empty{
+    text-align:center;
+    padding:40px 20px;
+    color:var(--muted);
+    font-size:14px;
+  }
+  .kal-loading{
+    text-align:center;
+    padding:30px;
+    color:var(--muted);
+    font-size:14px;
+  }
+
+  /* ===== HAUS ===== */
+  .haus-placeholder{
+    text-align:center;
+    padding:40px 20px;
+    color:var(--muted);
+    font-size:14px;
+  }
+  .haus-placeholder .haus-icon{
+    font-size:48px;
+    margin-bottom:12px;
+  }
 </style>
 </head>
 <body>
 
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
-    <h1><img src="icons/icon-192.png" alt=""> KoeWi Bierlogger</h1>
+    <h1><img src="icons/icon-192.png" alt=""> KoeWi App</h1>
     <p id="loginSubtitle">Bitte anmelden</p>
     <input id="loginName" placeholder="Dein Name (z.B. Faisst)" autocomplete="username">
     <input id="loginPw" type="password" placeholder="Passwort (min. 4 Zeichen)" autocomplete="current-password">
@@ -212,138 +326,196 @@
 
 <header>
   <div class="header-top">
-    <h1><img src="icons/icon-192.png" alt=""> KoeWi Bierlogger</h1>
+    <h1><img src="icons/icon-192.png" alt=""> <span id="appTitle">Getränke</span></h1>
     <div>
       <span id="loggedInName" class="loggedInName hidden"></span>
       <span id="statusDot"></span><span id="statusText">offline</span>
       <button id="logoutBtn" class="logout-btn hidden" onclick="doLogout()">⏏</button>
     </div>
   </div>
-  <div class="tabbar">
+
+  <!-- Getränke: interner Tab-Header -->
+  <div id="getraenke-header" class="tabbar">
     <button id="tab-log" class="active" onclick="switchTab('log')">Buchen</button>
     <button id="tab-stand" onclick="switchTab('stand')">Stand</button>
     <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
   </div>
+
+  <!-- Kalender: interner Tab-Header -->
+  <div id="kalender-header" class="kal-subtabbar hidden">
+    <button id="kaltab-termine" class="active" onclick="switchKalTab('termine')">Termine</button>
+    <button id="kaltab-meine" onclick="switchKalTab('meine')">Meine Zusagen</button>
+  </div>
+
+  <!-- Haus: kein Sub-Header nötig vorerst -->
 </header>
 
 <main>
 
   <div id="offlineBanner" class="offline-banner hidden">📡 Kein Netz – Buchen aktuell nicht möglich</div>
 
-  <!-- ===== TAB: BUCHEN ===== -->
-  <section id="view-log" class="view">
-    <div class="card" id="catCard">
-      <h2>Kategorie</h2>
-      <div class="grid" id="catGrid"></div>
-    </div>
+  <!-- ==================== BEREICH: GETRÄNKE ==================== -->
+  <div id="bereich-getraenke">
 
-    <div class="card hidden" id="nameCard">
-      <div class="back-row"><button onclick="showCats()">⬅ Zurück</button></div>
-      <h2 id="nameCardTitle">Wer?</h2>
-      <div class="name-list" id="nameList"></div>
-      <div class="namecard-footer">
-        <div id="cfgTimestamp" class="timestamp-hint"></div>
+    <!-- TAB: BUCHEN -->
+    <section id="view-log" class="view">
+      <div class="card" id="catCard">
+        <h2>Kategorie</h2>
+        <div class="grid" id="catGrid"></div>
       </div>
-    </div>
 
-    <div class="card hidden" id="mengeCard">
-      <div class="back-row"><button onclick="backFromMenge()">⬅ Zurück</button></div>
-      <h2 id="mengeTitle">Wie viel?</h2>
-      <div class="grid menge-grid" id="mengeGrid"></div>
-    </div>
-
-    <div class="card" id="stornoCard">
-      <h2>↩ Letzte Buchung stornieren</h2>
-      <button class="btn-full btn-danger" onclick="doStorno()">Stornieren (5 Min. Frist)</button>
-    </div>
-  </section>
-
-  <!-- ===== TAB: STAND ===== -->
-  <section id="view-stand" class="view hidden">
-    <div class="subtabbar">
-      <button id="subtab-abrechnung" class="active" onclick="switchStandTab('abrechnung')">Abrechnung</button>
-      <button id="subtab-rangliste" onclick="switchStandTab('rangliste')">Rangliste</button>
-    </div>
-    <div id="subview-abrechnung">
-      <div class="card">
-        <h2>Aktueller Abrechnungsstand</h2>
-        <button class="btn-full btn-accent" onclick="loadStand()">Stand laden</button>
-        <div id="standResult" style="white-space:pre-wrap; font-size:14px; margin-top:10px;"></div>
-        <div id="standCacheHint" class="cache-hint"></div>
-      </div>
-    </div>
-    <div id="subview-rangliste" class="hidden">
-      <div class="card">
-        <h2>🏆 Rangliste</h2>
-        <button class="btn-full btn-accent" onclick="loadRangliste()">Rangliste laden</button>
-        <div id="ranglisteResult" class="rangliste-text"></div>
-        <div id="ranglisteCacheHint" class="cache-hint"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===== TAB: ADMIN ===== -->
-  <section id="view-admin" class="view hidden">
-
-    <!-- LAGER -->
-    <div class="card">
-      <h2>Lager</h2>
-      <div class="lager-header-row">
-        <div class="lager-num-wrap">
-          <div id="lagerBestandNum" class="lager-big-num">–</div>
-          <div class="lager-unit">Flaschen</div>
+      <div class="card hidden" id="nameCard">
+        <div class="back-row"><button onclick="showCats()">⬅ Zurück</button></div>
+        <h2 id="nameCardTitle">Wer?</h2>
+        <div class="name-list" id="nameList"></div>
+        <div class="namecard-footer">
+          <div id="cfgTimestamp" class="timestamp-hint"></div>
         </div>
-        <button class="btn-icon-reload" onclick="loadLager()" title="Aktualisieren">↻</button>
       </div>
-      <div class="lager-timestamp" id="lagerTimestamp"></div>
+
+      <div class="card hidden" id="mengeCard">
+        <div class="back-row"><button onclick="backFromMenge()">⬅ Zurück</button></div>
+        <h2 id="mengeTitle">Wie viel?</h2>
+        <div class="grid menge-grid" id="mengeGrid"></div>
+      </div>
+
+      <div class="card" id="stornoCard">
+        <h2>↩ Letzte Buchung stornieren</h2>
+        <button class="btn-full btn-danger" onclick="doStorno()">Stornieren (5 Min. Frist)</button>
+      </div>
+    </section>
+
+    <!-- TAB: STAND -->
+    <section id="view-stand" class="view hidden">
+      <div class="subtabbar">
+        <button id="subtab-abrechnung" class="active" onclick="switchStandTab('abrechnung')">Abrechnung</button>
+        <button id="subtab-rangliste" onclick="switchStandTab('rangliste')">Rangliste</button>
+      </div>
+      <div id="subview-abrechnung">
+        <div class="card">
+          <h2>Aktueller Abrechnungsstand</h2>
+          <button class="btn-full btn-accent" onclick="loadStand()">Stand laden</button>
+          <div id="standResult" style="white-space:pre-wrap; font-size:14px; margin-top:10px;"></div>
+          <div id="standCacheHint" class="cache-hint"></div>
+        </div>
+      </div>
+      <div id="subview-rangliste" class="hidden">
+        <div class="card">
+          <h2>🏆 Rangliste</h2>
+          <button class="btn-full btn-accent" onclick="loadRangliste()">Rangliste laden</button>
+          <div id="ranglisteResult" class="rangliste-text"></div>
+          <div id="ranglisteCacheHint" class="cache-hint"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: ADMIN -->
+    <section id="view-admin" class="view hidden">
+      <div class="card">
+        <h2>Lager</h2>
+        <div class="lager-header-row">
+          <div class="lager-num-wrap">
+            <div id="lagerBestandNum" class="lager-big-num">–</div>
+            <div class="lager-unit">Flaschen</div>
+          </div>
+          <button class="btn-icon-reload" onclick="loadLager()" title="Aktualisieren">↻</button>
+        </div>
+        <div class="lager-timestamp" id="lagerTimestamp"></div>
+      </div>
+      <div class="card">
+        <h2>Einkauf</h2>
+        <div class="input-row">
+          <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
+          <button class="btn-ok" onclick="doEinkauf()">Buchen</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Inventur</h2>
+        <div class="input-row">
+          <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen gesamt">
+          <button class="btn-accent" onclick="doInventur()">Buchen</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>💸 Zahlung eintragen</h2>
+        <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
+        <div class="admin-name-list" id="zahlungNameList"></div>
+        <span id="zahlungSelectedBadge" class="selected-name-badge hidden"></span>
+        <div class="input-row">
+          <input id="zahlungBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 8.50)">
+          <button class="btn-ok" onclick="doZahlung()">Buchen</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>⚡ Strafe eintragen</h2>
+        <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
+        <div class="admin-name-list" id="strafeNameList"></div>
+        <span id="strafeSelectedBadge" class="selected-name-badge hidden"></span>
+        <div class="input-row" style="margin-bottom:8px;">
+          <input id="strafeBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 2.50)">
+        </div>
+        <div class="input-row">
+          <input id="strafeGrund" type="text" placeholder="Grund (optional)" style="margin-bottom:0;">
+          <button class="btn-danger" onclick="doStrafe()">Buchen</button>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /bereich-getraenke -->
+
+  <!-- ==================== BEREICH: KALENDER ==================== -->
+  <div id="bereich-kalender" class="hidden">
+
+    <!-- SUB: ALLE TERMINE -->
+    <div id="kalview-termine">
+      <div class="card">
+        <h2>📅 Nächste Termine</h2>
+        <button class="btn-full btn-kal" onclick="loadKalender()" style="margin-bottom:8px;">Termine laden</button>
+        <div id="kalenderListe"></div>
+        <div id="kalenderCacheHint" class="cache-hint"></div>
+      </div>
     </div>
 
+    <!-- SUB: MEINE ZUSAGEN -->
+    <div id="kalview-meine" class="hidden">
+      <div class="card">
+        <h2>✅ Meine Zusagen</h2>
+        <div id="meineZusagenListe"></div>
+      </div>
+    </div>
+
+  </div><!-- /bereich-kalender -->
+
+  <!-- ==================== BEREICH: HAUS ==================== -->
+  <div id="bereich-haus" class="hidden">
     <div class="card">
-      <h2>Einkauf</h2>
-      <div class="input-row">
-        <input id="einkaufKisten" type="number" min="1" placeholder="Anzahl Kisten">
-        <button class="btn-ok" onclick="doEinkauf()">Buchen</button>
+      <div class="haus-placeholder">
+        <div class="haus-icon">🏠</div>
+        <strong style="color:var(--accent-haus2); font-size:16px;">Haus</strong>
+        <p style="margin-top:8px;">Putzplan, Aufgaben &amp; Veranstaltungsplanung<br>kommen hier bald rein.</p>
       </div>
     </div>
-
-    <div class="card">
-      <h2>Inventur</h2>
-      <div class="input-row">
-        <input id="inventurFlaschen" type="number" min="0" placeholder="Gezählte Flaschen gesamt">
-        <button class="btn-accent" onclick="doInventur()">Buchen</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>💸 Zahlung eintragen</h2>
-      <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
-      <div class="admin-name-list" id="zahlungNameList"></div>
-      <span id="zahlungSelectedBadge" class="selected-name-badge hidden"></span>
-      <div class="input-row">
-        <input id="zahlungBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 8.50)">
-        <button class="btn-ok" onclick="doZahlung()">Buchen</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>⚡ Strafe eintragen</h2>
-      <small class="muted" style="display:block;margin-bottom:8px;">Person auswählen:</small>
-      <div class="admin-name-list" id="strafeNameList"></div>
-      <span id="strafeSelectedBadge" class="selected-name-badge hidden"></span>
-      <div class="input-row" style="margin-bottom:8px;">
-        <input id="strafeBetrag" type="number" min="0.01" step="0.01" placeholder="Betrag (z.B. 2.50)">
-      </div>
-      <div class="input-row">
-        <input id="strafeGrund" type="text" placeholder="Grund (optional, z.B. Zu spät)" style="margin-bottom:0;">
-        <button class="btn-danger" onclick="doStrafe()">Buchen</button>
-      </div>
-    </div>
-
-  </section>
+  </div><!-- /bereich-haus -->
 
 </main>
 
-</div>
+</div><!-- /appRoot -->
+
+<!-- ===== BOTTOM NAVIGATION ===== -->
+<nav class="bottom-nav" id="bottomNav" style="display:none;">
+  <button id="nav-getraenke" class="active-getraenke" onclick="switchBereich('getraenke')">
+    <span class="nav-icon">🍺</span>
+    Getränke
+  </button>
+  <button id="nav-kalender" onclick="switchBereich('kalender')">
+    <span class="nav-icon">📅</span>
+    Kalender
+  </button>
+  <button id="nav-haus" onclick="switchBereich('haus')">
+    <span class="nav-icon">🏠</span>
+    Haus
+  </button>
+</nav>
 
 <div id="toast"></div>
 

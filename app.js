@@ -1,5 +1,6 @@
 // ====== KONFIGURATION ======
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfx9LSz3QW-pfn5TRkc8QvWIt025rIiKz2QrJLukZ4XytuYaCnAxZSLHBKj9gWLAnj/exec";
+const HAUS_SCRIPT_URL = ""; // <- hier später die Hausorga-Web-App-URL eintragen
 const API_KEY = "bier123";
 const KATEGORIEN = [
   { label: "Haus", hasNameList: true, listKey: "haus" },
@@ -19,9 +20,14 @@ const KISTEN_MAX = 5;
 const SESSION_KEY = "bier_session";
 const CFG_CACHE_KEY = "bier_cfg";
 const LAGER_CACHE_KEY = "bier_lager_cache";
+const KAL_CACHE_KEY = "bier_kal_cache";
 
 let zahlungSelectedName = null;
 let strafeSelectedName = null;
+let aktuellerBereich = "getraenke";
+
+// Merkt sich pro Event den gesetzten Status (nur im RAM, reicht für Session)
+let meineStatusMap = {};
 
 function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch(e){ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
@@ -73,6 +79,7 @@ function enterApp(session){
   document.getElementById("loggedInName").textContent = session.name;
   document.getElementById("loggedInName").classList.remove("hidden");
   document.getElementById("logoutBtn").classList.remove("hidden");
+  document.getElementById("bottomNav").style.display = "";
   const isAdmin = session.rolle === "admin" || session.rolle === "kassenwart";
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
   renderCats();
@@ -84,6 +91,7 @@ function enterApp(session){
   restoreCachedRangliste();
   restoreCachedLager();
   loadLager();
+  restoreCachedKalender();
 }
 
 function doLogout(){ clearSession(); location.reload(); }
@@ -93,6 +101,186 @@ function checkSessionOnLoad(){
   if(s){ document.getElementById("loginName").value = s.name; enterApp(s); }
 }
 
+// ====== BEREICHE (Bottom-Nav) ======
+function switchBereich(bereich){
+  aktuellerBereich = bereich;
+  ["getraenke","kalender","haus"].forEach(b => {
+    document.getElementById("bereich-" + b).classList.toggle("hidden", b !== bereich);
+    const btn = document.getElementById("nav-" + b);
+    btn.className = b === bereich ? "active-" + b : "";
+  });
+  // Header tauschen
+  document.getElementById("getraenke-header").classList.toggle("hidden", bereich !== "getraenke");
+  document.getElementById("kalender-header").classList.toggle("hidden", bereich !== "kalender");
+  // Titel anpassen
+  const titels = { getraenke: "Getränke", kalender: "Kalender", haus: "Haus" };
+  document.getElementById("appTitle").textContent = titels[bereich];
+}
+
+// ====== KALENDER ======
+function switchKalTab(tab){
+  ["termine","meine"].forEach(t => {
+    document.getElementById("kalview-" + t).classList.toggle("hidden", t !== tab);
+    document.getElementById("kaltab-" + t).classList.toggle("active", t === tab);
+  });
+  if(tab === "meine") renderMeineZusagen();
+}
+
+function restoreCachedKalender(){
+  try{
+    const raw = localStorage.getItem(KAL_CACHE_KEY);
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    if(Array.isArray(data.events)) renderEventListe(data.events);
+    const hint = document.getElementById("kalenderCacheHint");
+    if(hint && data.ts) hint.textContent = "Cache: " + formatCacheTime(data.ts.toString()) + " Uhr";
+  }catch(e){}
+}
+
+async function loadKalender(){
+  const liste = document.getElementById("kalenderListe");
+  const hint  = document.getElementById("kalenderCacheHint");
+  liste.innerHTML = '<div class="kal-loading">⏳ Lade Termine…</div>';
+  hint.textContent = "";
+
+  if(!navigator.onLine){
+    restoreCachedKalender();
+    if(hint) hint.textContent = "Offline – Cache angezeigt";
+    return;
+  }
+
+  if(!HAUS_SCRIPT_URL){
+    liste.innerHTML = '<div class="kal-empty">ℹ️ Kalender noch nicht konfiguriert.<br><small>HAUS_SCRIPT_URL in app.js eintragen.</small></div>';
+    return;
+  }
+
+  try{
+    const url = new URL(HAUS_SCRIPT_URL);
+    url.searchParams.set("action", "getevents");
+    url.searchParams.set("key", API_KEY);
+    const res = await fetchWithTimeout(url.toString(), 15000);
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Fehler vom Server");
+    const events = data.events || [];
+    const now = Date.now();
+    localStorage.setItem(KAL_CACHE_KEY, JSON.stringify({ events, ts: now }));
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(now.toString()) + " Uhr";
+    renderEventListe(events);
+  }catch(e){
+    liste.innerHTML = '<div class="kal-empty">⚠️ ' + e.message + '</div>';
+    restoreCachedKalender();
+  }
+}
+
+function renderEventListe(events){
+  const liste = document.getElementById("kalenderListe");
+  if(!events || events.length === 0){
+    liste.innerHTML = '<div class="kal-empty">Keine bevorstehenden Termine.</div>';
+    return;
+  }
+  liste.innerHTML = "";
+  events.forEach(ev => {
+    const card = document.createElement("div");
+    card.className = "event-card";
+    const start = ev.start ? new Date(ev.start) : null;
+    const when = start ? start.toLocaleString("de-DE", {
+      weekday:"short", day:"2-digit", month:"2-digit", year:"2-digit",
+      hour:"2-digit", minute:"2-digit"
+    }) : "";
+    const currentStatus = meineStatusMap[ev.id || ev.title] || null;
+    card.innerHTML = `
+      <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
+      <div class="event-meta">
+        ${when ? '<span>🕐 ' + when + '</span>' : ''}
+        ${ev.location ? '<span>📍 ' + escHtml(ev.location) + '</span>' : ''}
+        ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
+      </div>
+      <div class="event-actions" id="evact-${escHtml(ev.id || ev.title)}">
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="dabei" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="vielleicht" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="abgesagt" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
+      </div>
+      ${ev.teilnehmer && ev.teilnehmer.length ? '<div class="event-teilnehmer">👥 ' + ev.teilnehmer.map(t=>escHtml(t)).join(', ') + '</div>' : ''}
+    `;
+    liste.appendChild(card);
+  });
+}
+
+async function setAttendance(ev, status, btn){
+  const session = getSession();
+  if(!session){ toast("Bitte erst anmelden."); return; }
+
+  const evId = ev.id || ev.title;
+
+  // Buttons im Block markieren
+  const actionsDiv = btn.closest(".event-actions");
+  if(actionsDiv){
+    actionsDiv.querySelectorAll("button").forEach(b => b.className = "");
+    const cls = status === "dabei" ? "status-dabei" : status === "vielleicht" ? "status-vielleicht" : "status-abgesagt";
+    btn.className = cls;
+  }
+  meineStatusMap[evId] = status;
+
+  if(!navigator.onLine){
+    toast("Offline – Status wird beim nächsten Sync gespeichert");
+    return;
+  }
+
+  if(!HAUS_SCRIPT_URL){ toast("Kalender-URL noch nicht konfiguriert."); return; }
+
+  try{
+    const url = new URL(HAUS_SCRIPT_URL);
+    url.searchParams.set("key", API_KEY);
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "setattendance",
+        event_id: ev.id || "",
+        event_start: ev.start || "",
+        event_title: ev.title || "",
+        name: session.name,
+        status: status
+      })
+    });
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Fehler");
+    toast("✓ Status gespeichert");
+  }catch(e){
+    toast("⚠️ " + e.message);
+  }
+}
+
+function renderMeineZusagen(){
+  const session = getSession();
+  const liste = document.getElementById("meineZusagenListe");
+  try{
+    const raw = localStorage.getItem(KAL_CACHE_KEY);
+    if(!raw){ liste.innerHTML = '<div class="kal-empty">Termine noch nicht geladen.</div>'; return; }
+    const { events } = JSON.parse(raw);
+    const meine = (events || []).filter(ev => meineStatusMap[ev.id || ev.title] === "dabei" || meineStatusMap[ev.id || ev.title] === "vielleicht");
+    if(!meine.length){ liste.innerHTML = '<div class="kal-empty">Noch keine Zusagen.</div>'; return; }
+    liste.innerHTML = "";
+    meine.forEach(ev => {
+      const start = ev.start ? new Date(ev.start) : null;
+      const when = start ? start.toLocaleString("de-DE", { weekday:"short", day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+      const s = meineStatusMap[ev.id || ev.title];
+      const badge = s === "dabei" ? "<span style='color:var(--ok);font-size:12px;'>✅ Dabei</span>" : "<span style='color:#ffd;font-size:12px;'>❔ Vielleicht</span>";
+      const d = document.createElement("div");
+      d.className = "event-card";
+      d.innerHTML = `<h3>${escHtml(ev.title||'')}</h3><div class="event-meta"><span>🕐 ${when}</span></div>${badge}`;
+      liste.appendChild(d);
+    });
+  }catch(e){
+    liste.innerHTML = '<div class="kal-empty">Fehler beim Laden.</div>';
+  }
+}
+
+function escHtml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ====== STATUS / OFFLINE ======
 function updateQueueBadge(){
   const b = document.getElementById("queueBadge");
   if(b) b.classList.add("hidden");
@@ -115,6 +303,7 @@ window.addEventListener("online", updateStatus);
 window.addEventListener("offline", updateStatus);
 setInterval(updateStatus, 15000);
 
+// ====== HTTP HELPERS ======
 function buildUrl(params){
   const u = new URL(SCRIPT_URL);
   Object.entries(params).forEach(([k,v]) => u.searchParams.set(k, v));
@@ -188,6 +377,7 @@ function formatCacheTime(tsStr){
   return d.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
 }
 
+// ====== CONFIG ======
 function loadCachedConfig(){
   try{
     const raw = localStorage.getItem(CFG_CACHE_KEY);
@@ -203,10 +393,7 @@ function loadCachedConfig(){
 }
 
 async function fetchConfig(background = false){
-  if(!navigator.onLine){
-    loadCachedConfig();
-    return;
-  }
+  if(!navigator.onLine){ loadCachedConfig(); return; }
   try{
     const res = await fetchWithTimeout(buildUrl({action:"getconfig"}), 10000);
     const data = await res.json();
@@ -223,6 +410,7 @@ async function fetchConfig(background = false){
   }
 }
 
+// ====== GETRÄNKE: KATEGORIEN & BUCHEN ======
 function renderCats(){
   const grid = document.getElementById("catGrid");
   grid.innerHTML = "";
@@ -326,6 +514,7 @@ async function logBuchung(anzahl, typ){
   if(ok){ showCats(); }
 }
 
+// ====== ADMIN: NAMENSLISTEN ======
 function renderAdminNameLists(){
   const allePersonen = [...cfg.haus, ...cfg.nonloci];
   ["zahlungNameList","strafeNameList"].forEach(listId => {
@@ -382,6 +571,7 @@ async function doStrafe(){
   }
 }
 
+// ====== STAND & RANGLISTE ======
 const STAND_CACHE_KEY          = "bier_stand_cache";
 const STAND_CACHE_TIME_KEY     = "bier_stand_cache_time";
 const RANGLISTE_CACHE_KEY      = "bier_rangliste_cache";
@@ -476,13 +666,13 @@ async function loadRangliste(){
   }
 }
 
+// ====== STORNO ======
 async function doStorno(){
   if(!navigator.onLine){ toast("Kein Netz -- Storno nicht möglich."); return; }
   try{
     const res = await fetchWithTimeout(buildUrl({action:"storno"}), 15000);
     if(!res.ok) throw new Error("HTTP " + res.status);
     const text = await res.text();
-    // Exakt die Text-Rückmeldung des GAS-Backends anzeigen (z.B. "Storno erfolgt!" oder "Storno nicht möglich.")
     toast(text || "Storno verarbeitet.");
   }catch(e){
     if(e.name === "AbortError"){
@@ -493,6 +683,7 @@ async function doStorno(){
   }
 }
 
+// ====== LAGER ======
 function restoreCachedLager(){
   try{
     const raw = localStorage.getItem(LAGER_CACHE_KEY);
@@ -540,6 +731,7 @@ async function doInventur(){
   await sendAction({ action:"inventur", menge:flaschen });
 }
 
+// ====== GETRÄNKE: INTERNER TAB-WECHSEL ======
 function switchTab(tab){
   ["log","stand","admin"].forEach(t=>{
     document.getElementById("view-"+t).classList.toggle("hidden", t!==tab);
@@ -548,6 +740,7 @@ function switchTab(tab){
   if(tab === "admin") restoreCachedLager();
 }
 
+// ====== INIT ======
 checkSessionOnLoad();
 
 if("serviceWorker" in navigator){
