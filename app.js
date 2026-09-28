@@ -139,12 +139,20 @@ function switchBereich(bereich){
     document.getElementById("bereich-" + b).classList.toggle("hidden", b !== bereich);
     const btn = document.getElementById("nav-" + b);
     btn.className = b === bereich ? "active-" + b : "";
-    if(b === "haus") return;
   });
   document.getElementById("getraenke-header").classList.toggle("hidden", bereich !== "getraenke");
   document.getElementById("kalender-header").classList.toggle("hidden", bereich !== "kalender");
+  document.getElementById("haus-header").classList.toggle("hidden", bereich !== "haus");
   const titels = { getraenke: "Getränke", kalender: "Kalender", haus: "Haus" };
   document.getElementById("appTitle").textContent = titels[bereich] || "";
+}
+
+// ====== HAUS SUB-TABS ======
+function switchHausTab(tab){
+  ["kalender","aufgaben"].forEach(t => {
+    document.getElementById("hausview-" + t).classList.toggle("hidden", t !== tab);
+    document.getElementById("haustab-" + t).classList.toggle("active", t === tab);
+  });
 }
 
 // ====== KALENDER (Allgemein) ======
@@ -177,13 +185,21 @@ function kalResetMonth(){
 }
 
 function renderKalMonthNav(){
-  const el = document.getElementById("kalMonthLabel");
-  if(!el) return;
   const now = new Date();
   const isCurrentMonth = kalViewDate.getFullYear() === now.getFullYear() && kalViewDate.getMonth() === now.getMonth();
-  el.textContent = kalViewDate.toLocaleString("de-DE", { month: "long", year: "numeric" });
+  const label = kalViewDate.toLocaleString("de-DE", { month: "long", year: "numeric" });
+
+  // Allgemein-Kalender
+  const el = document.getElementById("kalMonthLabel");
+  if(el) el.textContent = label;
   const todayBtn = document.getElementById("kalTodayBtn");
   if(todayBtn) todayBtn.style.display = isCurrentMonth ? "none" : "";
+
+  // Haus-Kalender
+  const hausEl = document.getElementById("hausMonthLabel");
+  if(hausEl) hausEl.textContent = label;
+  const hausTodayBtn = document.getElementById("hausTodayBtn");
+  if(hausTodayBtn) hausTodayBtn.style.display = isCurrentMonth ? "none" : "";
 }
 
 function filterEventsByMonth(events){
