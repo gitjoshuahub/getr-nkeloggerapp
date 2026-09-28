@@ -224,7 +224,7 @@
   .bottom-nav button.active-kalender{color:var(--accent-kal2);}
   .bottom-nav button.active-haus{color:var(--accent-haus2);}
 
-  /* ===== KALENDER ===== */
+  /* ===== KALENDER (allgemein) ===== */
   .kal-subtabbar{
     display:flex; gap:4px; background:var(--card2); border-radius:10px; padding:3px;
     border:1px solid var(--border); margin-bottom:12px;
@@ -234,7 +234,17 @@
   }
   .kal-subtabbar button.active{color:#fff; background:var(--accent-kal);}
 
-  /* Monatsnavigation */
+  /* ===== HAUS SUBTAB ===== */
+  .haus-subtabbar{
+    display:flex; gap:4px; background:var(--card2); border-radius:10px; padding:3px;
+    border:1px solid var(--border); margin-bottom:12px;
+  }
+  .haus-subtabbar button{
+    flex:1; border-radius:7px; background:transparent; padding:8px 0; font-size:13px; color:var(--muted);
+  }
+  .haus-subtabbar button.active{color:#fff; background:var(--accent-haus);}
+
+  /* Monatsnavigation (geteilt) */
   .kal-month-nav{
     display:flex;
     align-items:center;
@@ -263,6 +273,16 @@
     background:transparent;
     border:1px solid var(--accent-kal);
     color:var(--accent-kal2);
+    font-size:12px;
+    padding:5px 9px;
+    border-radius:8px;
+    white-space:nowrap;
+  }
+  .haus-month-nav button:active{background:var(--accent-haus); color:#fff; border-color:var(--accent-haus);}
+  #hausTodayBtn{
+    background:transparent;
+    border:1px solid var(--accent-haus);
+    color:var(--accent-haus2);
     font-size:12px;
     padding:5px 9px;
     border-radius:8px;
@@ -331,18 +351,6 @@
     color:var(--muted);
     font-size:14px;
   }
-
-  /* ===== HAUS ===== */
-  .haus-placeholder{
-    text-align:center;
-    padding:40px 20px;
-    color:var(--muted);
-    font-size:14px;
-  }
-  .haus-placeholder .haus-icon{
-    font-size:48px;
-    margin-bottom:12px;
-  }
 </style>
 </head>
 <body>
@@ -378,10 +386,16 @@
     <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
   </div>
 
-  <!-- Kalender: interner Tab-Header -->
+  <!-- Kalender (allgemein): interner Tab-Header -->
   <div id="kalender-header" class="kal-subtabbar">
     <button id="kaltab-termine" class="active" onclick="switchKalTab('termine')">Termine</button>
     <button id="kaltab-meine" onclick="switchKalTab('meine')">Meine Zusagen</button>
+  </div>
+
+  <!-- Haus: interner Tab-Header -->
+  <div id="haus-header" class="haus-subtabbar hidden">
+    <button id="haustab-kalender" class="active" onclick="switchHausTab('kalender')">🗓 Kalender</button>
+    <button id="haustab-aufgaben" onclick="switchHausTab('aufgaben')">📋 Aufgaben</button>
   </div>
 
 </header>
@@ -499,14 +513,13 @@
 
   </div><!-- /bereich-getraenke -->
 
-  <!-- ==================== BEREICH: KALENDER ==================== -->
+  <!-- ==================== BEREICH: KALENDER (allgemein) ==================== -->
   <div id="bereich-kalender">
 
     <!-- SUB: ALLE TERMINE -->
     <div id="kalview-termine">
       <div class="card">
         <h2>📅 Termine</h2>
-        <!-- Monatsnavigation -->
         <div class="kal-month-nav">
           <button onclick="kalPrevMonth()">‹</button>
           <span id="kalMonthLabel" class="month-label"></span>
@@ -531,13 +544,34 @@
 
   <!-- ==================== BEREICH: HAUS ==================== -->
   <div id="bereich-haus" class="hidden">
-    <div class="card">
-      <div class="haus-placeholder">
-        <div class="haus-icon">🏠</div>
-        <strong style="color:var(--accent-haus2); font-size:16px;">Haus</strong>
-        <p style="margin-top:8px;">Putzplan, Aufgaben &amp; Veranstaltungsplanung<br>kommen hier bald rein.</p>
+
+    <!-- HAUS SUB: KALENDER -->
+    <div id="hausview-kalender">
+      <div class="card">
+        <h2>🏠 Haus-Termine</h2>
+        <div class="kal-month-nav haus-month-nav">
+          <button onclick="kalPrevMonth()">‹</button>
+          <span id="hausMonthLabel" class="month-label"></span>
+          <button id="hausTodayBtn" onclick="kalResetMonth()" style="display:none;">Heute</button>
+          <button onclick="kalNextMonth()">›</button>
+        </div>
+        <button class="btn-full btn-haus" onclick="loadHausKalender()" style="margin-bottom:8px;">Termine laden</button>
+        <div id="hausKalenderListe"></div>
+        <div id="hausKalenderCacheHint" class="cache-hint"></div>
       </div>
     </div>
+
+    <!-- HAUS SUB: AUFGABEN (Platzhalter) -->
+    <div id="hausview-aufgaben" class="hidden">
+      <div class="card">
+        <div style="text-align:center; padding:40px 20px; color:var(--muted);">
+          <div style="font-size:48px; margin-bottom:12px;">📋</div>
+          <strong style="color:var(--accent-haus2); font-size:16px;">Aufgaben</strong>
+          <p style="margin-top:8px;">Putzplan &amp; To-dos kommen hier bald rein.</p>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /bereich-haus -->
 
 </main>
