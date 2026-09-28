@@ -10,6 +10,9 @@ const KATEGORIEN = [
   { label: "Couleur", hasNameList: false, logName: "Couleur", fullWidth: true }
 ];
 
+// Muss mit MONTHS_AHEAD im GAS-Backend übereinstimmen
+const MONTHS_AHEAD = 6;
+
 let cfg = { haus: [], nonloci: [] };
 let currentKat = null;
 let currentName = null;
@@ -21,6 +24,8 @@ const SESSION_KEY = "bier_session";
 const CFG_CACHE_KEY = "bier_cfg";
 const LAGER_CACHE_KEY = "bier_lager_cache";
 const KAL_CACHE_KEY = "bier_kal_cache";
+// Separater Cache-Key für Haus-Kalender
+const HAUS_KAL_CACHE_KEY = "bier_haus_kal_cache";
 
 let zahlungSelectedName = null;
 let strafeSelectedName = null;
@@ -29,8 +34,15 @@ let aktuellerBereich = "kalender";
 // Merkt sich pro Event den gesetzten Status (nur im RAM, reicht für Session)
 let meineStatusMap = {};
 
-// Kalender-Monatsnavigation
-let kalViewDate = new Date(); // zeigt auf den aktuell angezeigten Monat
+// Kalender-Monatsnavigation (geteilt für beide Kalender-Bereiche)
+let kalViewDate = new Date();
+
+// ====== EVENT KEY ======
+// Robuster Schlüssel: calendar|id|start|title — verhindert Kollisionen
+// zwischen Haus- und Allgemein-Terminen mit gleichem Titel/Start
+function getEventKey(ev) {
+  return [ev.calendar || "", ev.id || "", ev.start || "", ev.title || ""].join("|");
+}
 
 function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch(e){ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
@@ -89,7 +101,6 @@ function enterApp(session){
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
 
   // Haus-Tab: nur für Mitglieder in cfg.haus – prüfen sobald Config geladen
-  // Vorläufig ausblenden, wird nach fetchConfig gesetzt
   document.getElementById("nav-haus").style.display = "none";
 
   renderCats();
@@ -109,7 +120,6 @@ function enterApp(session){
 }
 
 function applyHausTabVisibility(session){
-  // Haus-Tab nur zeigen wenn Name in cfg.haus ist (case-insensitive)
   const name = session.name.toLowerCase();
   const istHaus = cfg.haus.some(h => h.toLowerCase() === name);
   document.getElementById("nav-haus").style.display = istHaus ? "" : "none";
@@ -129,18 +139,15 @@ function switchBereich(bereich){
     document.getElementById("bereich-" + b).classList.toggle("hidden", b !== bereich);
     const btn = document.getElementById("nav-" + b);
     btn.className = b === bereich ? "active-" + b : "";
-    // Haus-Tab-Sichtbarkeit nicht anfassen
     if(b === "haus") return;
   });
-  // Header tauschen
   document.getElementById("getraenke-header").classList.toggle("hidden", bereich !== "getraenke");
   document.getElementById("kalender-header").classList.toggle("hidden", bereich !== "kalender");
-  // Titel anpassen
   const titels = { getraenke: "Getränke", kalender: "Kalender", haus: "Haus" };
   document.getElementById("appTitle").textContent = titels[bereich] || "";
 }
 
-// ====== KALENDER ======
+// ====== KALENDER (Allgemein) ======
 function switchKalTab(tab){
   ["termine","meine"].forEach(t => {
     document.getElementById("kalview-" + t).classList.toggle("hidden", t !== tab);
@@ -154,16 +161,19 @@ function kalPrevMonth(){
   kalViewDate = new Date(kalViewDate.getFullYear(), kalViewDate.getMonth() - 1, 1);
   renderKalMonthNav();
   renderKalenderFromCache();
+  renderHausKalenderFromCache();
 }
 function kalNextMonth(){
   kalViewDate = new Date(kalViewDate.getFullYear(), kalViewDate.getMonth() + 1, 1);
   renderKalMonthNav();
   renderKalenderFromCache();
+  renderHausKalenderFromCache();
 }
 function kalResetMonth(){
   kalViewDate = new Date();
   renderKalMonthNav();
   renderKalenderFromCache();
+  renderHausKalenderFromCache();
 }
 
 function renderKalMonthNav(){
@@ -186,12 +196,23 @@ function filterEventsByMonth(events){
   });
 }
 
+// Filtert auf Kalender "allgemein" und aktuellen Monat
+function filterAllgemeinEventsByMonth(events){
+  return filterEventsByMonth((events || []).filter(ev => ev.calendar === "allgemein"));
+}
+
+// Filtert auf Kalender "haus" und aktuellen Monat
+function filterHausEventsByMonth(events){
+  return filterEventsByMonth((events || []).filter(ev => ev.calendar === "haus"));
+}
+
 function renderKalenderFromCache(){
   try{
     const raw = localStorage.getItem(KAL_CACHE_KEY);
     if(!raw){ renderEventListe([]); return; }
     const data = JSON.parse(raw);
-    renderEventListe(filterEventsByMonth(data.events || []));
+    // Zeige nur allgemein-Termine im Kalender-Tab
+    renderEventListe(filterAllgemeinEventsByMonth(data.events || []));
   }catch(e){ renderEventListe([]); }
 }
 
@@ -200,7 +221,7 @@ function restoreCachedKalender(){
     const raw = localStorage.getItem(KAL_CACHE_KEY);
     if(!raw) return;
     const data = JSON.parse(raw);
-    renderEventListe(filterEventsByMonth(data.events || []));
+    renderEventListe(filterAllgemeinEventsByMonth(data.events || []));
     const hint = document.getElementById("kalenderCacheHint");
     if(hint && data.ts) hint.textContent = "Cache: " + formatCacheTime(data.ts.toString()) + " Uhr";
   }catch(e){}
@@ -222,15 +243,18 @@ async function loadKalender(){
   try{
     const url = new URL(HAUS_SCRIPT_URL);
     url.searchParams.set("action", "getevents");
+    // Beide Kalender laden und gemeinsam cachen
     url.searchParams.set("key", API_KEY);
     const res = await fetchWithTimeout(url.toString(), 15000);
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Fehler vom Server");
     const events = data.events || [];
     const now = Date.now();
+    // Gemeinsamer Cache für beide Kalender
     localStorage.setItem(KAL_CACHE_KEY, JSON.stringify({ events, ts: now }));
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(now.toString()) + " Uhr";
-    renderEventListe(filterEventsByMonth(events));
+    // Kalender-Tab zeigt nur "allgemein"
+    renderEventListe(filterAllgemeinEventsByMonth(events));
   }catch(e){
     liste.innerHTML = '<div class="kal-empty">⚠️ ' + e.message + '</div>';
     renderKalenderFromCache();
@@ -253,7 +277,8 @@ function renderEventListe(events){
       weekday:"short", day:"2-digit", month:"2-digit", year:"2-digit",
       hour:"2-digit", minute:"2-digit"
     }) : "";
-    const currentStatus = meineStatusMap[ev.id || ev.title] || null;
+    const evKey = getEventKey(ev);
+    const currentStatus = meineStatusMap[evKey] || null;
     card.innerHTML = `
       <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
       <div class="event-meta">
@@ -261,10 +286,10 @@ function renderEventListe(events){
         ${ev.location ? '<span>📍 ' + escHtml(ev.location) + '</span>' : ''}
         ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
       </div>
-      <div class="event-actions" id="evact-${escHtml(ev.id || ev.title)}">
-        <button class="${currentStatus==='dabei'?'status-dabei':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="dabei" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
-        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="vielleicht" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
-        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" data-ev-id="${escHtml(ev.id||ev.title)}" data-status="abgesagt" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
+      <div class="event-actions" id="evact-${escHtml(evKey)}">
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
       </div>
       ${ev.teilnehmer && ev.teilnehmer.length ? '<div class="event-teilnehmer">👥 ' + ev.teilnehmer.map(t=>escHtml(t)).join(', ') + '</div>' : ''}
     `;
@@ -272,11 +297,101 @@ function renderEventListe(events){
   });
 }
 
+// ====== HAUS-KALENDER ======
+function renderHausKalenderFromCache(){
+  try{
+    const raw = localStorage.getItem(KAL_CACHE_KEY);
+    if(!raw){ renderHausEventListe([]); return; }
+    const data = JSON.parse(raw);
+    renderHausEventListe(filterHausEventsByMonth(data.events || []));
+  }catch(e){ renderHausEventListe([]); }
+}
+
+async function loadHausKalender(){
+  const liste = document.getElementById("hausKalenderListe");
+  const hint  = document.getElementById("hausKalenderCacheHint");
+  if(!liste) return;
+  liste.innerHTML = '<div class="kal-loading">⏳ Lade Haus-Termine…</div>';
+  if(hint) hint.textContent = "";
+
+  if(!navigator.onLine){
+    renderHausKalenderFromCache();
+    if(hint) hint.textContent = "Offline – Cache angezeigt";
+    return;
+  }
+
+  try{
+    const url = new URL(HAUS_SCRIPT_URL);
+    url.searchParams.set("action", "getevents");
+    // Nur Haus-Kalender abrufen
+    url.searchParams.set("kalender", "haus");
+    url.searchParams.set("key", API_KEY);
+    const res = await fetchWithTimeout(url.toString(), 15000);
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "Fehler vom Server");
+
+    // Haus-Events in den gemeinsamen Cache mergen
+    // (erhalte allgemein-Events, ersetze haus-Events)
+    let allEvents = [];
+    try{
+      const existing = JSON.parse(localStorage.getItem(KAL_CACHE_KEY) || "{}");
+      allEvents = (existing.events || []).filter(ev => ev.calendar !== "haus");
+    }catch(e){}
+    allEvents = allEvents.concat(data.events || []);
+    allEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+    const now = Date.now();
+    localStorage.setItem(KAL_CACHE_KEY, JSON.stringify({ events: allEvents, ts: now }));
+    if(hint) hint.textContent = "Geladen: " + formatCacheTime(now.toString()) + " Uhr";
+    renderHausEventListe(filterHausEventsByMonth(data.events || []));
+  }catch(e){
+    if(liste) liste.innerHTML = '<div class="kal-empty">⚠️ ' + e.message + '</div>';
+    renderHausKalenderFromCache();
+  }
+}
+
+function renderHausEventListe(events){
+  const liste = document.getElementById("hausKalenderListe");
+  if(!liste) return;
+  renderKalMonthNav();
+  if(!events || events.length === 0){
+    liste.innerHTML = '<div class="kal-empty">Keine Haus-Termine in diesem Monat.</div>';
+    return;
+  }
+  liste.innerHTML = "";
+  events.forEach(ev => {
+    const card = document.createElement("div");
+    card.className = "event-card";
+    const start = ev.start ? new Date(ev.start) : null;
+    const when = start ? start.toLocaleString("de-DE", {
+      weekday:"short", day:"2-digit", month:"2-digit", year:"2-digit",
+      hour:"2-digit", minute:"2-digit"
+    }) : "";
+    const evKey = getEventKey(ev);
+    const currentStatus = meineStatusMap[evKey] || null;
+    card.innerHTML = `
+      <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
+      <div class="event-meta">
+        ${when ? '<span>🕐 ' + when + '</span>' : ''}
+        ${ev.location ? '<span>📍 ' + escHtml(ev.location) + '</span>' : ''}
+        ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
+      </div>
+      <div class="event-actions" id="evact-haus-${escHtml(evKey)}">
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
+      </div>
+    `;
+    liste.appendChild(card);
+  });
+}
+
+// ====== SETATTENDANCE ======
 async function setAttendance(ev, status, btn){
   const session = getSession();
   if(!session){ toast("Bitte erst anmelden."); return; }
 
-  const evId = ev.id || ev.title;
+  const evKey = getEventKey(ev);
 
   // Buttons im Block markieren
   const actionsDiv = btn.closest(".event-actions");
@@ -285,7 +400,7 @@ async function setAttendance(ev, status, btn){
     const cls = status === "dabei" ? "status-dabei" : status === "vielleicht" ? "status-vielleicht" : "status-abgesagt";
     btn.className = cls;
   }
-  meineStatusMap[evId] = status;
+  meineStatusMap[evKey] = status;
 
   if(!navigator.onLine){
     toast("Offline – Status wird beim nächsten Sync gespeichert");
@@ -303,6 +418,7 @@ async function setAttendance(ev, status, btn){
         event_id: ev.id || "",
         event_start: ev.start || "",
         event_title: ev.title || "",
+        kalender: ev.calendar || "",
         name: session.name,
         status: status
       })
@@ -321,17 +437,22 @@ function renderMeineZusagen(){
     const raw = localStorage.getItem(KAL_CACHE_KEY);
     if(!raw){ liste.innerHTML = '<div class="kal-empty">Termine noch nicht geladen.</div>'; return; }
     const { events } = JSON.parse(raw);
-    const meine = (events || []).filter(ev => meineStatusMap[ev.id || ev.title] === "dabei" || meineStatusMap[ev.id || ev.title] === "vielleicht");
+    const meine = (events || []).filter(ev => {
+      const k = getEventKey(ev);
+      return meineStatusMap[k] === "dabei" || meineStatusMap[k] === "vielleicht";
+    });
     if(!meine.length){ liste.innerHTML = '<div class="kal-empty">Noch keine Zusagen.</div>'; return; }
     liste.innerHTML = "";
     meine.forEach(ev => {
       const start = ev.start ? new Date(ev.start) : null;
       const when = start ? start.toLocaleString("de-DE", { weekday:"short", day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-      const s = meineStatusMap[ev.id || ev.title];
+      const evKey = getEventKey(ev);
+      const s = meineStatusMap[evKey];
       const badge = s === "dabei" ? "<span style='color:var(--ok);font-size:12px;'>✅ Dabei</span>" : "<span style='color:#ffd;font-size:12px;'>❔ Vielleicht</span>";
+      const calBadge = ev.calendar === "haus" ? " <span style='font-size:10px;color:var(--muted);'>🏠</span>" : "";
       const d = document.createElement("div");
       d.className = "event-card";
-      d.innerHTML = `<h3>${escHtml(ev.title||'')}</h3><div class="event-meta"><span>🕐 ${when}</span></div>${badge}`;
+      d.innerHTML = `<h3>${escHtml(ev.title||'')}${calBadge}</h3><div class="event-meta"><span>🕐 ${when}</span></div>${badge}`;
       liste.appendChild(d);
     });
   }catch(e){
