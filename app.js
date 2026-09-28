@@ -403,13 +403,17 @@ function renderHausEventListe(events){
 }
 
 // ====== SETATTENDANCE ======
+// WICHTIG: Content-Type muss text/plain sein (kein application/json)!
+// Google Apps Script blockiert Requests mit application/json durch einen
+// CORS-Preflight, den GAS nicht korrekt beantwortet. text/plain umgeht
+// den Preflight komplett. Das GAS-Backend parst den Body als JSON-String.
 async function setAttendance(ev, status, btn){
   const session = getSession();
   if(!session){ toast("Bitte erst anmelden."); return; }
 
   const evKey = getEventKey(ev);
 
-  // Buttons im Block markieren
+  // Buttons im Block sofort markieren (optimistic UI)
   const actionsDiv = btn.closest(".event-actions");
   if(actionsDiv){
     actionsDiv.querySelectorAll("button").forEach(b => b.className = "");
@@ -424,15 +428,14 @@ async function setAttendance(ev, status, btn){
   }
 
   try{
-    const url = new URL(HAUS_SCRIPT_URL);
-    url.searchParams.set("key", API_KEY);
-    const res = await fetch(url.toString(), {
+    // text/plain vermeidet CORS-Preflight – GAS versteht es trotzdem
+    const res = await fetch(HAUS_SCRIPT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({
         action: "setattendance",
         event_id: ev.id || "",
-        event_start: ev.start || "",
+        event_start: ev.start ? ev.start.toString() : "",
         event_title: ev.title || "",
         kalender: ev.calendar || "",
         name: session.name,
