@@ -234,6 +234,41 @@
   }
   .kal-subtabbar button.active{color:#fff; background:var(--accent-kal);}
 
+  /* Monatsnavigation */
+  .kal-month-nav{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:12px;
+    gap:8px;
+  }
+  .kal-month-nav .month-label{
+    font-size:15px;
+    font-weight:700;
+    color:var(--text);
+    flex:1;
+    text-align:center;
+  }
+  .kal-month-nav button{
+    background:var(--card2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    color:var(--text);
+    font-size:14px;
+    padding:7px 12px;
+    min-width:36px;
+  }
+  .kal-month-nav button:active{background:var(--accent-kal); color:#fff; border-color:var(--accent-kal);}
+  #kalTodayBtn{
+    background:transparent;
+    border:1px solid var(--accent-kal);
+    color:var(--accent-kal2);
+    font-size:12px;
+    padding:5px 9px;
+    border-radius:8px;
+    white-space:nowrap;
+  }
+
   .event-card{
     background:var(--card2);
     border-radius:12px;
@@ -328,7 +363,7 @@
 
 <header>
   <div class="header-top">
-    <h1><img src="icons/icon-192.png" alt=""> <span id="appTitle">Getränke</span></h1>
+    <h1><img src="icons/icon-192.png" alt=""> <span id="appTitle">Kalender</span></h1>
     <div>
       <span id="loggedInName" class="loggedInName hidden"></span>
       <span id="statusDot"></span><span id="statusText">offline</span>
@@ -337,19 +372,18 @@
   </div>
 
   <!-- Getränke: interner Tab-Header -->
-  <div id="getraenke-header" class="tabbar">
+  <div id="getraenke-header" class="tabbar hidden">
     <button id="tab-log" class="active" onclick="switchTab('log')">Buchen</button>
     <button id="tab-stand" onclick="switchTab('stand')">Stand</button>
     <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
   </div>
 
   <!-- Kalender: interner Tab-Header -->
-  <div id="kalender-header" class="kal-subtabbar hidden">
+  <div id="kalender-header" class="kal-subtabbar">
     <button id="kaltab-termine" class="active" onclick="switchKalTab('termine')">Termine</button>
     <button id="kaltab-meine" onclick="switchKalTab('meine')">Meine Zusagen</button>
   </div>
 
-  <!-- Haus: kein Sub-Header nötig vorerst -->
 </header>
 
 <main>
@@ -357,7 +391,7 @@
   <div id="offlineBanner" class="offline-banner hidden">📡 Kein Netz – Buchen aktuell nicht möglich</div>
 
   <!-- ==================== BEREICH: GETRÄNKE ==================== -->
-  <div id="bereich-getraenke">
+  <div id="bereich-getraenke" class="hidden">
 
     <!-- TAB: BUCHEN -->
     <section id="view-log" class="view">
@@ -466,12 +500,19 @@
   </div><!-- /bereich-getraenke -->
 
   <!-- ==================== BEREICH: KALENDER ==================== -->
-  <div id="bereich-kalender" class="hidden">
+  <div id="bereich-kalender">
 
     <!-- SUB: ALLE TERMINE -->
     <div id="kalview-termine">
       <div class="card">
-        <h2>📅 Nächste Termine</h2>
+        <h2>📅 Termine</h2>
+        <!-- Monatsnavigation -->
+        <div class="kal-month-nav">
+          <button onclick="kalPrevMonth()">‹</button>
+          <span id="kalMonthLabel" class="month-label"></span>
+          <button id="kalTodayBtn" onclick="kalResetMonth()" style="display:none;">Heute</button>
+          <button onclick="kalNextMonth()">›</button>
+        </div>
         <button class="btn-full btn-kal" onclick="loadKalender()" style="margin-bottom:8px;">Termine laden</button>
         <div id="kalenderListe"></div>
         <div id="kalenderCacheHint" class="cache-hint"></div>
@@ -505,15 +546,15 @@
 
 <!-- ===== BOTTOM NAVIGATION ===== -->
 <nav class="bottom-nav" id="bottomNav" style="display:none;">
-  <button id="nav-getraenke" class="active-getraenke" onclick="switchBereich('getraenke')">
+  <button id="nav-getraenke" onclick="switchBereich('getraenke')">
     <span class="nav-icon">🍺</span>
     Getränke
   </button>
-  <button id="nav-kalender" onclick="switchBereich('kalender')">
+  <button id="nav-kalender" class="active-kalender" onclick="switchBereich('kalender')">
     <span class="nav-icon">📅</span>
     Kalender
   </button>
-  <button id="nav-haus" onclick="switchBereich('haus')">
+  <button id="nav-haus" onclick="switchBereich('haus')" style="display:none;">
     <span class="nav-icon">🏠</span>
     Haus
   </button>

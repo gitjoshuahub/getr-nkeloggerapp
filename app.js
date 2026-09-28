@@ -24,10 +24,13 @@ const KAL_CACHE_KEY = "bier_kal_cache";
 
 let zahlungSelectedName = null;
 let strafeSelectedName = null;
-let aktuellerBereich = "getraenke";
+let aktuellerBereich = "kalender";
 
 // Merkt sich pro Event den gesetzten Status (nur im RAM, reicht für Session)
 let meineStatusMap = {};
+
+// Kalender-Monatsnavigation
+let kalViewDate = new Date(); // zeigt auf den aktuell angezeigten Monat
 
 function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch(e){ return null; } }
 function setSession(s){ localStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
@@ -80,18 +83,36 @@ function enterApp(session){
   document.getElementById("loggedInName").classList.remove("hidden");
   document.getElementById("logoutBtn").classList.remove("hidden");
   document.getElementById("bottomNav").style.display = "";
+
+  // Admin-Tab
   const isAdmin = session.rolle === "admin" || session.rolle === "kassenwart";
   document.getElementById("tab-admin").style.display = isAdmin ? "" : "none";
+
+  // Haus-Tab: nur für Mitglieder in cfg.haus – prüfen sobald Config geladen
+  // Vorläufig ausblenden, wird nach fetchConfig gesetzt
+  document.getElementById("nav-haus").style.display = "none";
+
   renderCats();
   updateStatus();
   loadCachedConfig();
-  fetchConfig(true);
+  fetchConfig(true).then(() => applyHausTabVisibility(session));
   updateQueueBadge();
   restoreCachedStand();
   restoreCachedRangliste();
   restoreCachedLager();
   loadLager();
+  kalViewDate = new Date();
   restoreCachedKalender();
+
+  // Start auf Kalender
+  switchBereich("kalender");
+}
+
+function applyHausTabVisibility(session){
+  // Haus-Tab nur zeigen wenn Name in cfg.haus ist (case-insensitive)
+  const name = session.name.toLowerCase();
+  const istHaus = cfg.haus.some(h => h.toLowerCase() === name);
+  document.getElementById("nav-haus").style.display = istHaus ? "" : "none";
 }
 
 function doLogout(){ clearSession(); location.reload(); }
@@ -108,13 +129,15 @@ function switchBereich(bereich){
     document.getElementById("bereich-" + b).classList.toggle("hidden", b !== bereich);
     const btn = document.getElementById("nav-" + b);
     btn.className = b === bereich ? "active-" + b : "";
+    // Haus-Tab-Sichtbarkeit nicht anfassen
+    if(b === "haus") return;
   });
   // Header tauschen
   document.getElementById("getraenke-header").classList.toggle("hidden", bereich !== "getraenke");
   document.getElementById("kalender-header").classList.toggle("hidden", bereich !== "kalender");
   // Titel anpassen
   const titels = { getraenke: "Getränke", kalender: "Kalender", haus: "Haus" };
-  document.getElementById("appTitle").textContent = titels[bereich];
+  document.getElementById("appTitle").textContent = titels[bereich] || "";
 }
 
 // ====== KALENDER ======
@@ -126,15 +149,62 @@ function switchKalTab(tab){
   if(tab === "meine") renderMeineZusagen();
 }
 
+// Monatsnavigation
+function kalPrevMonth(){
+  kalViewDate = new Date(kalViewDate.getFullYear(), kalViewDate.getMonth() - 1, 1);
+  renderKalMonthNav();
+  renderKalenderFromCache();
+}
+function kalNextMonth(){
+  kalViewDate = new Date(kalViewDate.getFullYear(), kalViewDate.getMonth() + 1, 1);
+  renderKalMonthNav();
+  renderKalenderFromCache();
+}
+function kalResetMonth(){
+  kalViewDate = new Date();
+  renderKalMonthNav();
+  renderKalenderFromCache();
+}
+
+function renderKalMonthNav(){
+  const el = document.getElementById("kalMonthLabel");
+  if(!el) return;
+  const now = new Date();
+  const isCurrentMonth = kalViewDate.getFullYear() === now.getFullYear() && kalViewDate.getMonth() === now.getMonth();
+  el.textContent = kalViewDate.toLocaleString("de-DE", { month: "long", year: "numeric" });
+  const todayBtn = document.getElementById("kalTodayBtn");
+  if(todayBtn) todayBtn.style.display = isCurrentMonth ? "none" : "";
+}
+
+function filterEventsByMonth(events){
+  const y = kalViewDate.getFullYear();
+  const m = kalViewDate.getMonth();
+  return (events || []).filter(ev => {
+    if(!ev.start) return false;
+    const d = new Date(ev.start);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+}
+
+function renderKalenderFromCache(){
+  try{
+    const raw = localStorage.getItem(KAL_CACHE_KEY);
+    if(!raw){ renderEventListe([]); return; }
+    const data = JSON.parse(raw);
+    renderEventListe(filterEventsByMonth(data.events || []));
+  }catch(e){ renderEventListe([]); }
+}
+
 function restoreCachedKalender(){
   try{
     const raw = localStorage.getItem(KAL_CACHE_KEY);
     if(!raw) return;
     const data = JSON.parse(raw);
-    if(Array.isArray(data.events)) renderEventListe(data.events);
+    renderEventListe(filterEventsByMonth(data.events || []));
     const hint = document.getElementById("kalenderCacheHint");
     if(hint && data.ts) hint.textContent = "Cache: " + formatCacheTime(data.ts.toString()) + " Uhr";
   }catch(e){}
+  renderKalMonthNav();
 }
 
 async function loadKalender(){
@@ -144,7 +214,7 @@ async function loadKalender(){
   hint.textContent = "";
 
   if(!navigator.onLine){
-    restoreCachedKalender();
+    renderKalenderFromCache();
     if(hint) hint.textContent = "Offline – Cache angezeigt";
     return;
   }
@@ -160,17 +230,18 @@ async function loadKalender(){
     const now = Date.now();
     localStorage.setItem(KAL_CACHE_KEY, JSON.stringify({ events, ts: now }));
     if(hint) hint.textContent = "Geladen: " + formatCacheTime(now.toString()) + " Uhr";
-    renderEventListe(events);
+    renderEventListe(filterEventsByMonth(events));
   }catch(e){
     liste.innerHTML = '<div class="kal-empty">⚠️ ' + e.message + '</div>';
-    restoreCachedKalender();
+    renderKalenderFromCache();
   }
 }
 
 function renderEventListe(events){
   const liste = document.getElementById("kalenderListe");
+  renderKalMonthNav();
   if(!events || events.length === 0){
-    liste.innerHTML = '<div class="kal-empty">Keine bevorstehenden Termine.</div>';
+    liste.innerHTML = '<div class="kal-empty">Keine Termine in diesem Monat.</div>';
     return;
   }
   liste.innerHTML = "";
@@ -245,7 +316,6 @@ async function setAttendance(ev, status, btn){
 }
 
 function renderMeineZusagen(){
-  const session = getSession();
   const liste = document.getElementById("meineZusagenListe");
   try{
     const raw = localStorage.getItem(KAL_CACHE_KEY);
