@@ -274,6 +274,29 @@ function syncStatusFromEvents(events){
   saveMeineStatus();
 }
 
+// Schreibt den eigenen Status in die gecachten Teilnahmen (status=null entfernt ihn)
+function applyOwnStatusToCache(ev, name, status){
+  const data = readKalCache();
+  if(!data) return;
+  const key = getEventKey(ev);
+  const me = (name || '').toLowerCase();
+  (data.events || []).forEach(e => {
+    if(getEventKey(e) !== key) return;
+    const list = (e.teilnahmen || []).filter(t => (t.name || '').toLowerCase() !== me);
+    if(status) list.push({ name: name, status: status });
+    e.teilnahmen = list;
+    e.teilnehmer = list.filter(t => t.status === 'dabei').map(t => t.name);
+  });
+  try{ localStorage.setItem(KAL_CACHE_KEY, JSON.stringify(data)); }catch(e){}
+}
+
+function findCachedEvent(ev){
+  const data = readKalCache();
+  if(!data) return null;
+  const key = getEventKey(ev);
+  return (data.events || []).find(e => getEventKey(e) === key) || null;
+}
+
 async function fetchKalenderEvents(kalender){
   const url = new URL(HAUS_SCRIPT_URL);
   url.searchParams.set('action', 'getevents');
@@ -341,30 +364,48 @@ function statusLabel(s){
 function makeBtn(label, handler){
   const b = document.createElement('button');
   b.textContent = label;
-  b.addEventListener('click', handler);
+  b.addEventListener('click', function(e){ e.stopPropagation(); handler(); });
   return b;
 }
 
-// Zeigt entweder die 3 Buttons oder (wenn Status existiert) Badge + 'ändern'
+// Zeigt entweder die 3 Buttons oder (wenn Status existiert) Badge + 'ändern' in EINER Zeile
 function renderAttendanceControls(box, ev, forceButtons){
   box.innerHTML = '';
+  box.removeAttribute('style');
   const status = meineStatusMap[getEventKey(ev)] || null;
+
   if(status && !forceButtons){
+    box.className = 'event-status-row';
+    Object.assign(box.style, {
+      display: 'flex', flexDirection: 'row', alignItems: 'center',
+      justifyContent: 'space-between', gap: '8px', marginTop: '8px'
+    });
+
     const badge = document.createElement('span');
     badge.className = 'event-status-badge';
-    badge.style.fontSize = '12px';
-    badge.style.color = status === 'abgesagt' ? 'var(--muted)' : 'var(--ok)';
+    Object.assign(badge.style, {
+      display: 'inline-flex', alignItems: 'center', margin: '0', padding: '0',
+      position: 'static', transform: 'none', fontSize: '13px', lineHeight: '1.2',
+      color: status === 'abgesagt' ? 'var(--muted, #999)' : 'var(--ok, #4caf50)'
+    });
     badge.textContent = statusLabel(status);
     box.appendChild(badge);
-    const change = makeBtn('ändern', () => renderAttendanceControls(box, ev, true));
-    change.style.marginLeft = '8px';
-    change.style.fontSize = '11px';
+
+    const change = makeBtn('ändern', function(){ renderAttendanceControls(box, ev, true); });
+    Object.assign(change.style, {
+      flex: '0 0 auto', width: 'auto', minWidth: '0', margin: '0',
+      padding: '4px 12px', fontSize: '12px', lineHeight: '1.2',
+      background: 'transparent', border: '1px solid var(--muted, #888)',
+      borderRadius: '8px', color: 'var(--muted, #aaa)', cursor: 'pointer'
+    });
     box.appendChild(change);
     return;
   }
-  box.appendChild(makeBtn('✅ Dabei', () => setAttendance(ev, 'dabei', box)));
-  box.appendChild(makeBtn('❔ Evtl.', () => setAttendance(ev, 'vielleicht', box)));
-  box.appendChild(makeBtn('❌ Absage', () => setAttendance(ev, 'abgesagt', box)));
+
+  box.className = 'event-actions';
+  box.appendChild(makeBtn('✅ Dabei', function(){ setAttendance(ev, 'dabei'); }));
+  box.appendChild(makeBtn('❔ Evtl.', function(){ setAttendance(ev, 'vielleicht'); }));
+  box.appendChild(makeBtn('❌ Absage', function(){ setAttendance(ev, 'abgesagt'); }));
 }
 
 function addSpan(parent, text, muted){
@@ -374,19 +415,25 @@ function addSpan(parent, text, muted){
   parent.appendChild(s);
 }
 
+function formatEventWhen(ev, full){
+  if(!ev.start) return '';
+  const start = new Date(ev.start);
+  const opts = full
+    ? { weekday:'short', day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }
+    : { weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' };
+  return start.toLocaleString('de-DE', opts);
+}
+
 function buildEventCard(ev){
   const card = document.createElement('div');
   card.className = 'event-card';
+  card.style.cursor = 'pointer';
 
   const h3 = document.createElement('h3');
   h3.textContent = ev.title || 'Ohne Titel';
   card.appendChild(h3);
 
-  const start = ev.start ? new Date(ev.start) : null;
-  const when = start ? start.toLocaleString('de-DE', {
-    weekday:'short', day:'2-digit', month:'2-digit', year:'2-digit',
-    hour:'2-digit', minute:'2-digit'
-  }) : '';
+  const when = formatEventWhen(ev, true);
   const meta = document.createElement('div');
   meta.className = 'event-meta';
   if(when) addSpan(meta, '🕐 ' + when);
@@ -395,16 +442,22 @@ function buildEventCard(ev){
   card.appendChild(meta);
 
   const box = document.createElement('div');
-  box.className = 'event-actions';
   renderAttendanceControls(box, ev, false);
   card.appendChild(box);
 
+  // Kurzliste der Zusagen direkt unter dem Termin (bleibt erhalten)
   if(ev.teilnehmer && ev.teilnehmer.length){
     const t = document.createElement('div');
     t.className = 'event-teilnehmer';
     t.textContent = '👥 ' + ev.teilnehmer.join(', ');
     card.appendChild(t);
   }
+
+  // Klick auf den Termin (nicht auf Buttons) öffnet die Detailansicht
+  card.addEventListener('click', function(e){
+    if(e.target.closest('button')) return;
+    openEventDetail(ev);
+  });
   return card;
 }
 
@@ -432,18 +485,97 @@ function renderHausEventListe(events){
   events.forEach(ev => liste.appendChild(buildEventCard(ev)));
 }
 
+// ====== TERMIN-DETAILANSICHT ======
+function closeEventDetail(){
+  const old = document.getElementById('eventDetailOverlay');
+  if(old) old.remove();
+}
+
+function openEventDetail(evIn){
+  closeEventDetail();
+  const ev = findCachedEvent(evIn) || evIn;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'eventDetailOverlay';
+  Object.assign(overlay.style, {
+    position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+    background: 'rgba(0,0,0,0.6)', zIndex: '1000',
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center'
+  });
+  overlay.addEventListener('click', function(e){ if(e.target === overlay) closeEventDetail(); });
+
+  const sheet = document.createElement('div');
+  Object.assign(sheet.style, {
+    background: 'var(--card, #1e1e1e)', color: 'var(--text, #eee)',
+    width: '100%', maxWidth: '560px', maxHeight: '80vh', overflowY: 'auto',
+    borderRadius: '16px 16px 0 0', padding: '16px 16px 28px', boxSizing: 'border-box'
+  });
+
+  const title = document.createElement('h3');
+  title.textContent = ev.title || 'Ohne Titel';
+  title.style.margin = '0 0 6px';
+  sheet.appendChild(title);
+
+  const info = document.createElement('div');
+  info.style.fontSize = '13px';
+  info.style.color = 'var(--muted, #aaa)';
+  info.style.marginBottom = '12px';
+  const parts = [];
+  const when = formatEventWhen(ev, true);
+  if(when) parts.push('🕐 ' + when);
+  if(ev.location) parts.push('📍 ' + ev.location);
+  info.textContent = parts.join('  ·  ');
+  sheet.appendChild(info);
+
+  if(ev.description){
+    const desc = document.createElement('div');
+    desc.textContent = ev.description;
+    desc.style.fontSize = '12px';
+    desc.style.color = 'var(--muted, #aaa)';
+    desc.style.marginBottom = '12px';
+    desc.style.whiteSpace = 'pre-wrap';
+    sheet.appendChild(desc);
+  }
+
+  const teilnahmen = ev.teilnahmen || [];
+  [['dabei', '✅ Dabei'], ['vielleicht', '❔ Vielleicht'], ['abgesagt', '❌ Abgesagt']].forEach(function(g){
+    const namen = teilnahmen.filter(t => t.status === g[0]).map(t => t.name);
+    const head = document.createElement('div');
+    head.textContent = g[1] + ' (' + namen.length + ')';
+    head.style.fontWeight = '600';
+    head.style.margin = '10px 0 4px';
+    sheet.appendChild(head);
+    const list = document.createElement('div');
+    list.textContent = namen.length ? namen.join(', ') : '–';
+    list.style.fontSize = '14px';
+    list.style.color = namen.length ? 'inherit' : 'var(--muted, #888)';
+    sheet.appendChild(list);
+  });
+
+  const close = document.createElement('button');
+  close.textContent = 'Schließen';
+  Object.assign(close.style, { marginTop: '18px', width: '100%', padding: '10px', cursor: 'pointer' });
+  close.addEventListener('click', closeEventDetail);
+  sheet.appendChild(close);
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+}
+
 // ====== SETATTENDANCE (GET, wegen GAS-302-Redirect) ======
-async function setAttendance(ev, status, box){
+async function setAttendance(ev, status){
   const session = getSession();
   if(!session){ toast('Bitte erst anmelden.'); return; }
 
   const evKey = getEventKey(ev);
   const previous = meineStatusMap[evKey] || null;
 
-  // Optimistic UI: Status sofort setzen, cachen, Buttons ausblenden
+  // Optimistic UI: Status sofort setzen, cachen und beide Listen neu zeichnen
   meineStatusMap[evKey] = status;
   saveMeineStatus();
-  renderAttendanceControls(box, ev, false);
+  applyOwnStatusToCache(ev, session.name, status);
+  renderKalenderFromCache();
+  renderHausKalenderFromCache();
 
   if(!navigator.onLine){
     toast('Offline – Status ist nur lokal gespeichert');
@@ -469,7 +601,9 @@ async function setAttendance(ev, status, box){
     // Rollback, damit die Anzeige nicht etwas Ungespeichertes vortäuscht
     if(previous) meineStatusMap[evKey] = previous; else delete meineStatusMap[evKey];
     saveMeineStatus();
-    renderAttendanceControls(box, ev, false);
+    applyOwnStatusToCache(ev, session.name, previous);
+    renderKalenderFromCache();
+    renderHausKalenderFromCache();
     toast('⚠️ Nicht gespeichert: ' + e.message);
   }
 }
@@ -485,23 +619,23 @@ function renderMeineZusagen(){
   if(!meine.length){ liste.innerHTML = '<div class="kal-empty">Noch keine Zusagen.</div>'; return; }
   liste.innerHTML = '';
   meine.forEach(ev => {
-    const start = ev.start ? new Date(ev.start) : null;
-    const when = start ? start.toLocaleString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
     const s = meineStatusMap[getEventKey(ev)];
     const d = document.createElement('div');
     d.className = 'event-card';
+    d.style.cursor = 'pointer';
     const h3 = document.createElement('h3');
     h3.textContent = (ev.title || '') + (ev.calendar === 'haus' ? ' 🏠' : '');
     d.appendChild(h3);
     const meta = document.createElement('div');
     meta.className = 'event-meta';
-    addSpan(meta, '🕐 ' + when);
+    addSpan(meta, '🕐 ' + formatEventWhen(ev, false));
     d.appendChild(meta);
     const badge = document.createElement('span');
     badge.style.fontSize = '12px';
-    badge.style.color = s === 'dabei' ? 'var(--ok)' : '#ffd';
+    badge.style.color = s === 'dabei' ? 'var(--ok, #4caf50)' : '#ffd';
     badge.textContent = statusLabel(s);
     d.appendChild(badge);
+    d.addEventListener('click', function(){ openEventDetail(ev); });
     liste.appendChild(d);
   });
 }
