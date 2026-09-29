@@ -685,8 +685,60 @@ async function setAttendance(ev, status){
   }
 }
 
+// Eigenen Status komplett löschen (Backend-Action 'removeattendance', löscht die Zeile im Sheet)
+async function removeAttendance(ev){
+  const session = getSession();
+  if(!session){ toast('Bitte erst anmelden.'); return; }
+
+  const evKey = getEventKey(ev);
+  const previous = meineStatusMap[evKey] || null;
+  if(!previous) return;
+
+  // Optimistic UI: lokal entfernen, Cache anpassen, Listen neu zeichnen
+  delete meineStatusMap[evKey];
+  saveMeineStatus();
+  applyOwnStatusToCache(ev, session.name, null);
+  renderKalenderFromCache();
+  renderHausKalenderFromCache();
+  renderMeineZusagen();
+
+  if(!navigator.onLine){
+    toast('Offline – Status ist nur lokal entfernt');
+    return;
+  }
+
+  try{
+    const url = new URL(HAUS_SCRIPT_URL);
+    url.searchParams.set('action', 'removeattendance');
+    url.searchParams.set('event_id', ev.id || '');
+    url.searchParams.set('event_start', ev.start ? ev.start.toString() : '');
+    url.searchParams.set('name', session.name);
+    url.searchParams.set('key', API_KEY);
+
+    const res = await fetchWithTimeout(url.toString(), 20000);
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || 'Fehler');
+    toast('✓ Status entfernt');
+  }catch(e){
+    // Rollback: alter Status kommt zurück
+    meineStatusMap[evKey] = previous;
+    saveMeineStatus();
+    applyOwnStatusToCache(ev, session.name, previous);
+    renderKalenderFromCache();
+    renderHausKalenderFromCache();
+    renderMeineZusagen();
+    const msg = String(e.message || '');
+    if(msg.indexOf('unknown_action') !== -1){
+      toast('⚠️ Backend-Update nötig (removeattendance) – Status blieb erhalten');
+    } else {
+      toast('⚠️ Nicht entfernt: ' + msg);
+    }
+  }
+}
+
 function renderMeineZusagen(){
   const liste = document.getElementById('meineZusagenListe');
+  if(!liste) return;
   const data = readKalCache();
   if(!data){ liste.innerHTML = '<div class="kal-empty">Termine noch nicht geladen.</div>'; return; }
   const meine = (data.events || []).filter(ev => {
@@ -708,12 +760,20 @@ function renderMeineZusagen(){
     meta.className = 'event-meta';
     addSpan(meta, '🕐 ' + formatEventWhen(ev, false));
     d.appendChild(meta);
-    const badge = document.createElement('span');
-    badge.style.fontSize = '12px';
-    badge.style.color = s === 'dabei' ? 'var(--ok, #4caf50)' : '#ffd';
-    badge.textContent = statusLabel(s);
-    d.appendChild(badge);
-    d.addEventListener('click', function(){ openEventDetail(ev); });
+
+    // Status links, 'Entfernen' rechts in derselben Zeile
+    const row = document.createElement('div');
+    styleStatusRow(row);
+    row.appendChild(makeBadge(statusLabel(s), s === 'dabei' ? 'var(--ok, #4caf50)' : '#ffd'));
+    const rm = makeBtn('Entfernen', function(){ removeAttendance(ev); });
+    styleGhostBtn(rm);
+    row.appendChild(rm);
+    d.appendChild(row);
+
+    d.addEventListener('click', function(e){
+      if(e.target.closest('button')) return;
+      openEventDetail(ev);
+    });
     liste.appendChild(d);
   });
 }
