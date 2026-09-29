@@ -403,10 +403,9 @@ function renderHausEventListe(events){
 }
 
 // ====== SETATTENDANCE ======
-// WICHTIG: Content-Type muss text/plain sein (kein application/json)!
-// Google Apps Script blockiert Requests mit application/json durch einen
-// CORS-Preflight, den GAS nicht korrekt beantwortet. text/plain umgeht
-// den Preflight komplett. Das GAS-Backend parst den Body als JSON-String.
+// WICHTIG: GAS Web-Apps antworten auf /exec mit 302-Redirect.
+// Browser wandeln POST->GET um und verlieren dabei den Body.
+// Deshalb: GET mit Query-Parametern verwenden (wie der Rest der App auch).
 async function setAttendance(ev, status, btn){
   const session = getSession();
   if(!session){ toast("Bitte erst anmelden."); return; }
@@ -428,20 +427,17 @@ async function setAttendance(ev, status, btn){
   }
 
   try{
-    // text/plain vermeidet CORS-Preflight – GAS versteht es trotzdem
-    const res = await fetch(HAUS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({
-        action: "setattendance",
-        event_id: ev.id || "",
-        event_start: ev.start ? ev.start.toString() : "",
-        event_title: ev.title || "",
-        kalender: ev.calendar || "",
-        name: session.name,
-        status: status
-      })
-    });
+    const url = new URL(HAUS_SCRIPT_URL);
+    url.searchParams.set("action", "setattendance");
+    url.searchParams.set("event_id", ev.id || "");
+    url.searchParams.set("event_start", ev.start ? ev.start.toString() : "");
+    url.searchParams.set("event_title", ev.title || "");
+    url.searchParams.set("kalender", ev.calendar || "");
+    url.searchParams.set("name", session.name);
+    url.searchParams.set("status", status);
+    url.searchParams.set("key", API_KEY);
+
+    const res = await fetchWithTimeout(url.toString(), 15000);
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || "Fehler");
     toast("✓ Status gespeichert");
