@@ -89,6 +89,8 @@ async function doLogin(){
 }
 
 function enterApp(session){
+  navRestoring = true;
+  const savedNav = readNav();
   document.getElementById('loginOverlay').classList.add('hidden');
   document.getElementById('appRoot').classList.remove('app-hidden');
   document.getElementById('loggedInName').textContent = session.name;
@@ -133,6 +135,11 @@ function enterApp(session){
     if(isHauswartSession(session)) loadHauswartPanel();
   }catch(e){ console.error('Putzplan-Init fehlgeschlagen', e); }
 
+  // Zuletzt geöffneten Tab wiederherstellen, Wischgesten aktivieren
+  try{ applyNav(savedNav, session); }catch(e){ console.error(e); }
+  navRestoring = false;
+  try{ initSwipe(); }catch(e){ console.error(e); }
+
   // Alles aus dem Cache anzeigen, im Hintergrund neu laden
   loadLager();
   loadKalender();
@@ -157,7 +164,7 @@ function applyHausTabVisibility(session){
   document.getElementById('nav-haus').style.display = istHaus ? '' : 'none';
 }
 
-function doLogout(){ clearSession(); location.reload(); }
+function doLogout(){ clearSession(); try{ localStorage.removeItem(NAV_KEY); }catch(e){} location.reload(); }
 
 function checkSessionOnLoad(){
   const s = getSession();
@@ -167,6 +174,7 @@ function checkSessionOnLoad(){
 // ====== BEREICHE (Bottom-Nav) ======
 function switchBereich(bereich){
   aktuellerBereich = bereich;
+  saveNav({ bereich: bereich });
   ['getraenke','kalender','haus'].forEach(b => {
     document.getElementById('bereich-' + b).classList.toggle('hidden', b !== bereich);
     const btn = document.getElementById('nav-' + b);
@@ -181,6 +189,7 @@ function switchBereich(bereich){
 
 // Haus-Unterbereiche: kalender, aufgaben (Putzplan), hauswart (nur Hauswart/Admin, wird per JS angelegt)
 function switchHausTab(tab){
+  saveNav({ haus: tab });
   ['kalender','aufgaben','hauswart'].forEach(t => {
     const v = document.getElementById('hausview-' + t);
     const b = document.getElementById('haustab-' + t);
@@ -194,6 +203,7 @@ function switchHausTab(tab){
 }
 
 function switchKalTab(tab){
+  saveNav({ kal: tab });
   ['termine','meine'].forEach(t => {
     document.getElementById('kalview-' + t).classList.toggle('hidden', t !== tab);
     document.getElementById('kaltab-' + t).classList.toggle('active', t === tab);
@@ -1098,6 +1108,7 @@ const RANGLISTE_CACHE_KEY      = 'bier_rangliste_cache';
 const RANGLISTE_CACHE_TIME_KEY = 'bier_rangliste_cache_time';
 
 function switchStandTab(tab){
+  saveNav({ stand: tab });
   ['abrechnung','rangliste'].forEach(t => {
     document.getElementById('subview-' + t).classList.toggle('hidden', t !== tab);
     document.getElementById('subtab-' + t).classList.toggle('active', t === tab);
@@ -1258,6 +1269,7 @@ async function doInventur(){
 
 // ====== GETRÄNKE: INTERNER TAB-WECHSEL ======
 function switchTab(tab){
+  saveNav({ getr: tab });
   ['log','stand','admin'].forEach(t => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
     document.getElementById('tab-' + t).classList.toggle('active', t === tab);
@@ -2119,6 +2131,210 @@ async function hwSavePlan(){
   }catch(e){
     toast('⚠️ ' + e.message);
   }
+}
+
+// ====================================================
+// NAVIGATION: letzten Tab merken + Wischgesten
+// ====================================================
+const NAV_KEY = 'bier_nav';
+let navRestoring = false;
+let swipeInited = false;
+let swipeBusy = false;
+let swipe = null;
+
+function readNav(){
+  try{
+    const raw = localStorage.getItem(NAV_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+function saveNav(patch){
+  if(navRestoring) return;
+  try{
+    const n = readNav() || {};
+    Object.keys(patch).forEach(k => { n[k] = patch[k]; });
+    localStorage.setItem(NAV_KEY, JSON.stringify(n));
+  }catch(e){}
+}
+
+// Stellt nach dem Neuladen den zuletzt geöffneten Bereich und die Unter-Tabs wieder her
+function applyNav(nav, session){
+  if(!nav) return;
+  const isAdmin = !!session && (session.rolle === 'admin' || session.rolle === 'kassenwart');
+  const hausOk = isHausMember(session);
+  try{
+    if(['termine','meine'].indexOf(nav.kal) !== -1) switchKalTab(nav.kal);
+    if(['abrechnung','rangliste'].indexOf(nav.stand) !== -1) switchStandTab(nav.stand);
+    if(['log','stand','admin'].indexOf(nav.getr) !== -1 && (nav.getr !== 'admin' || isAdmin)) switchTab(nav.getr);
+    if(hausOk && ['kalender','aufgaben','hauswart'].indexOf(nav.haus) !== -1 && document.getElementById('hausview-' + nav.haus)){
+      switchHausTab(nav.haus);
+    }
+    let b = nav.bereich;
+    if(b === 'haus' && !hausOk) b = 'kalender';
+    if(['getraenke','kalender','haus'].indexOf(b) !== -1) switchBereich(b);
+  }catch(e){ console.error('Navigation konnte nicht wiederhergestellt werden', e); }
+}
+
+// ---- Wischgesten: links/rechts wischen wechselt zur nächsten/vorherigen Seite ----
+function navVisible(id){
+  const e = document.getElementById(id);
+  return !!e && !e.classList.contains('hidden');
+}
+
+// Alle wischbaren Seiten in Reihenfolge: Getränke, Kalender, Haus
+function swipePages(){
+  const pages = [];
+  const adminTab = document.getElementById('tab-admin');
+  pages.push({ b: 'getraenke', s: 'log' }, { b: 'getraenke', s: 'stand' });
+  if(adminTab && adminTab.style.display !== 'none') pages.push({ b: 'getraenke', s: 'admin' });
+  pages.push({ b: 'kalender', s: 'termine' }, { b: 'kalender', s: 'meine' });
+  const navHaus = document.getElementById('nav-haus');
+  if(navHaus && navHaus.style.display !== 'none'){
+    pages.push({ b: 'haus', s: 'kalender' }, { b: 'haus', s: 'aufgaben' });
+    if(document.getElementById('hausview-hauswart')) pages.push({ b: 'haus', s: 'hauswart' });
+  }
+  return pages;
+}
+
+function swipeCurrentIndex(pages){
+  const b = aktuellerBereich;
+  let s;
+  if(b === 'getraenke') s = ['log','stand','admin'].find(x => navVisible('view-' + x));
+  else if(b === 'kalender') s = ['termine','meine'].find(x => navVisible('kalview-' + x));
+  else s = ['kalender','aufgaben','hauswart'].find(x => navVisible('hausview-' + x));
+  return pages.findIndex(p => p.b === b && p.s === s);
+}
+
+function swipeShow(page){
+  if(aktuellerBereich !== page.b) switchBereich(page.b);
+  if(page.b === 'getraenke') switchTab(page.s);
+  else if(page.b === 'kalender') switchKalTab(page.s);
+  else switchHausTab(page.s);
+  window.scrollTo(0, 0);
+}
+
+function initSwipe(){
+  if(swipeInited) return;
+  swipeInited = true;
+  const root = document.getElementById('appRoot');
+  if(root) root.style.touchAction = 'pan-y';
+  document.addEventListener('touchstart', swipeStart, { passive: true });
+  document.addEventListener('touchmove', swipeMove, { passive: true });
+  document.addEventListener('touchend', swipeEnd, { passive: true });
+  document.addEventListener('touchcancel', swipeCancel, { passive: true });
+}
+
+function swipeStart(e){
+  swipe = null;
+  if(swipeBusy) return;
+  const root = document.getElementById('appRoot');
+  if(!root || root.classList.contains('app-hidden')) return;
+  if(!e.touches || e.touches.length !== 1) return;
+  if(document.getElementById('eventDetailOverlay')) return;
+  const t = e.touches[0];
+  // Ränder freilassen (System-Zurück-Geste)
+  if(t.clientX < 24 || t.clientX > window.innerWidth - 24) return;
+  if(e.target && e.target.closest && e.target.closest('input, select, textarea')) return;
+  const pages = swipePages();
+  const idx = swipeCurrentIndex(pages);
+  if(idx < 0) return;
+  const el = document.getElementById('bereich-' + aktuellerBereich);
+  if(!el) return;
+  swipe = { x: t.clientX, y: t.clientY, t: Date.now(), state: 'pending', dx: 0, pages: pages, idx: idx, el: el };
+}
+
+function swipeMove(e){
+  if(!swipe || swipe.state === 'cancel') return;
+  const t = e.touches[0];
+  const dx = t.clientX - swipe.x;
+  const dy = t.clientY - swipe.y;
+  if(swipe.state === 'pending'){
+    if(Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)){ swipe.state = 'cancel'; return; }
+    if(Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5){
+      swipe.state = 'drag';
+      document.body.style.overflowX = 'hidden';
+      swipe.el.style.willChange = 'transform';
+    } else {
+      return;
+    }
+  }
+  const dir = dx < 0 ? 1 : -1;
+  const hasNext = !!swipe.pages[swipe.idx + dir];
+  swipe.dx = hasNext ? dx : dx * 0.25;
+  swipe.el.style.transition = 'none';
+  swipe.el.style.transform = 'translateX(' + swipe.dx + 'px)';
+  swipe.el.style.opacity = String(Math.max(0.5, 1 - Math.abs(swipe.dx) / (window.innerWidth * 1.2)));
+}
+
+function swipeEnd(){
+  const s = swipe;
+  swipe = null;
+  if(!s || s.state !== 'drag') return;
+  const dt = Math.max(1, Date.now() - s.t);
+  const dir = s.dx < 0 ? 1 : -1;
+  const target = s.pages[s.idx + dir];
+  const fast = Math.abs(s.dx) / dt > 0.5 && Math.abs(s.dx) > 30;
+  const far = Math.abs(s.dx) > Math.min(90, window.innerWidth * 0.25);
+  if(target && (far || fast)){
+    swipeCommit(s, dir, target);
+  } else {
+    swipeReset(s.el);
+  }
+}
+
+function swipeCancel(){
+  const s = swipe;
+  swipe = null;
+  if(s && s.state === 'drag') swipeReset(s.el);
+}
+
+function swipeReset(el){
+  el.style.transition = 'transform .2s ease, opacity .2s ease';
+  el.style.transform = '';
+  el.style.opacity = '';
+  setTimeout(function(){
+    el.style.transition = '';
+    el.style.willChange = '';
+    document.body.style.overflowX = '';
+  }, 230);
+}
+
+// Aktuelle Seite rausschieben, neue Seite von der Gegenseite hereingleiten lassen
+function swipeCommit(s, dir, target){
+  swipeBusy = true;
+  const el = s.el;
+  const w = window.innerWidth;
+  el.style.transition = 'transform .16s ease-in, opacity .16s ease-in';
+  el.style.transform = 'translateX(' + (-dir * w * 0.6) + 'px)';
+  el.style.opacity = '0';
+
+  setTimeout(function(){
+    el.style.transition = 'none';
+    el.style.transform = '';
+    el.style.opacity = '';
+    el.style.willChange = '';
+    swipeShow(target);
+
+    const nel = document.getElementById('bereich-' + aktuellerBereich);
+    if(!nel){
+      document.body.style.overflowX = '';
+      swipeBusy = false;
+      return;
+    }
+    nel.style.transition = 'none';
+    nel.style.transform = 'translateX(' + (dir * w * 0.35) + 'px)';
+    nel.style.opacity = '0';
+    void nel.offsetWidth;
+    nel.style.transition = 'transform .22s ease-out, opacity .22s ease-out';
+    nel.style.transform = '';
+    nel.style.opacity = '';
+    setTimeout(function(){
+      nel.style.transition = '';
+      document.body.style.overflowX = '';
+      swipeBusy = false;
+    }, 240);
+  }, 170);
 }
 
 // ====== INIT ======
