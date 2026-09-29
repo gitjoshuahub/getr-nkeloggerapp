@@ -13,6 +13,9 @@ const KATEGORIEN = [
 // Muss mit MONTHS_AHEAD im GAS-Backend übereinstimmen
 const MONTHS_AHEAD = 6;
 
+// Termine, deren Titel dieses Muster enthält, sind reine Erinnerungen (nur 'Erledigt' statt Zusage/Absage)
+const REMINDER_PATTERN = /\bAWB\b/i;
+
 let cfg = { haus: [], nonloci: [] };
 let currentKat = null;
 let currentName = null;
@@ -35,6 +38,10 @@ let kalViewDate = new Date();
 // ====== EVENT KEY ======
 function getEventKey(ev) {
   return [ev.calendar || '', ev.id || '', ev.start || '', ev.title || ''].join('|');
+}
+
+function isReminderEvent(ev){
+  return REMINDER_PATTERN.test((ev && ev.title) || '');
 }
 
 function getSession(){ try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch(e){ return null; } }
@@ -368,36 +375,74 @@ function makeBtn(label, handler){
   return b;
 }
 
+function styleGhostBtn(b){
+  Object.assign(b.style, {
+    flex: '0 0 auto', width: 'auto', minWidth: '0', margin: '0',
+    padding: '4px 12px', fontSize: '12px', lineHeight: '1.2',
+    background: 'transparent', border: '1px solid var(--muted, #888)',
+    borderRadius: '8px', color: 'var(--muted, #aaa)', cursor: 'pointer'
+  });
+}
+
+function styleStatusRow(box){
+  box.className = 'event-status-row';
+  Object.assign(box.style, {
+    display: 'flex', flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', gap: '8px', marginTop: '8px'
+  });
+}
+
+function makeBadge(text, color){
+  const badge = document.createElement('span');
+  badge.className = 'event-status-badge';
+  Object.assign(badge.style, {
+    display: 'inline-flex', alignItems: 'center', margin: '0', padding: '0',
+    position: 'static', transform: 'none', fontSize: '13px', lineHeight: '1.2',
+    color: color
+  });
+  badge.textContent = text;
+  return badge;
+}
+
+// Erinnerungs-Termine (z.B. AWB): nur 'Erledigt' abhaken, für alle sichtbar.
+// Nutzt intern den Status 'dabei' (kein Backend-Update nötig); 'abgesagt' hebt den eigenen Haken auf.
+function renderReminderControls(box, ev){
+  const session = getSession();
+  const me = session ? session.name.toLowerCase() : '';
+  const done = ev.teilnehmer || [];
+
+  if(!done.length){
+    box.className = 'event-actions';
+    box.appendChild(makeBtn('✓ Erledigt', function(){ setAttendance(ev, 'dabei'); }));
+    return;
+  }
+
+  styleStatusRow(box);
+  box.appendChild(makeBadge('✓ Erledigt von ' + done.join(', '), 'var(--ok, #4caf50)'));
+  if(done.some(n => (n || '').toLowerCase() === me)){
+    const undo = makeBtn('rückgängig', function(){ setAttendance(ev, 'abgesagt'); });
+    styleGhostBtn(undo);
+    box.appendChild(undo);
+  }
+}
+
 // Zeigt entweder die 3 Buttons oder (wenn Status existiert) Badge + 'ändern' in EINER Zeile
 function renderAttendanceControls(box, ev, forceButtons){
   box.innerHTML = '';
   box.removeAttribute('style');
+
+  if(isReminderEvent(ev)){
+    renderReminderControls(box, ev);
+    return;
+  }
+
   const status = meineStatusMap[getEventKey(ev)] || null;
 
   if(status && !forceButtons){
-    box.className = 'event-status-row';
-    Object.assign(box.style, {
-      display: 'flex', flexDirection: 'row', alignItems: 'center',
-      justifyContent: 'space-between', gap: '8px', marginTop: '8px'
-    });
-
-    const badge = document.createElement('span');
-    badge.className = 'event-status-badge';
-    Object.assign(badge.style, {
-      display: 'inline-flex', alignItems: 'center', margin: '0', padding: '0',
-      position: 'static', transform: 'none', fontSize: '13px', lineHeight: '1.2',
-      color: status === 'abgesagt' ? 'var(--muted, #999)' : 'var(--ok, #4caf50)'
-    });
-    badge.textContent = statusLabel(status);
-    box.appendChild(badge);
-
+    styleStatusRow(box);
+    box.appendChild(makeBadge(statusLabel(status), status === 'abgesagt' ? 'var(--muted, #999)' : 'var(--ok, #4caf50)'));
     const change = makeBtn('ändern', function(){ renderAttendanceControls(box, ev, true); });
-    Object.assign(change.style, {
-      flex: '0 0 auto', width: 'auto', minWidth: '0', margin: '0',
-      padding: '4px 12px', fontSize: '12px', lineHeight: '1.2',
-      background: 'transparent', border: '1px solid var(--muted, #888)',
-      borderRadius: '8px', color: 'var(--muted, #aaa)', cursor: 'pointer'
-    });
+    styleGhostBtn(change);
     box.appendChild(change);
     return;
   }
@@ -445,8 +490,8 @@ function buildEventCard(ev){
   renderAttendanceControls(box, ev, false);
   card.appendChild(box);
 
-  // Kurzliste der Zusagen direkt unter dem Termin (bleibt erhalten)
-  if(ev.teilnehmer && ev.teilnehmer.length){
+  // Kurzliste der Zusagen direkt unter dem Termin (bei Erinnerungen übernimmt das die Erledigt-Zeile)
+  if(!isReminderEvent(ev) && ev.teilnehmer && ev.teilnehmer.length){
     const t = document.createElement('div');
     t.className = 'event-teilnehmer';
     t.textContent = '👥 ' + ev.teilnehmer.join(', ');
@@ -547,20 +592,35 @@ function openEventDetail(evIn){
     sheet.appendChild(desc);
   }
 
-  const teilnahmen = ev.teilnahmen || [];
-  [['dabei', '✅ Dabei'], ['vielleicht', '❔ Vielleicht'], ['abgesagt', '❌ Abgesagt']].forEach(function(g){
-    const namen = teilnahmen.filter(t => t.status === g[0]).map(t => t.name);
+  if(isReminderEvent(ev)){
+    // Erinnerung: nur Erledigt-Status anzeigen
+    const done = ev.teilnehmer || [];
     const head = document.createElement('div');
-    head.textContent = g[1] + ' (' + namen.length + ')';
     head.style.fontWeight = '600';
     head.style.margin = '10px 0 4px';
+    head.textContent = done.length ? '✓ Erledigt' : 'Noch nicht erledigt';
     sheet.appendChild(head);
-    const list = document.createElement('div');
-    list.textContent = namen.length ? namen.join(', ') : '–';
-    list.style.fontSize = '14px';
-    list.style.color = namen.length ? 'inherit' : 'var(--muted, #888)';
-    sheet.appendChild(list);
-  });
+    const who = document.createElement('div');
+    who.style.fontSize = '14px';
+    who.style.color = done.length ? 'inherit' : 'var(--muted, #888)';
+    who.textContent = done.length ? 'von ' + done.join(', ') : '–';
+    sheet.appendChild(who);
+  } else {
+    const teilnahmen = ev.teilnahmen || [];
+    [['dabei', '✅ Dabei'], ['vielleicht', '❔ Vielleicht'], ['abgesagt', '❌ Abgesagt']].forEach(function(g){
+      const namen = teilnahmen.filter(t => t.status === g[0]).map(t => t.name);
+      const head = document.createElement('div');
+      head.textContent = g[1] + ' (' + namen.length + ')';
+      head.style.fontWeight = '600';
+      head.style.margin = '10px 0 4px';
+      sheet.appendChild(head);
+      const list = document.createElement('div');
+      list.textContent = namen.length ? namen.join(', ') : '–';
+      list.style.fontSize = '14px';
+      list.style.color = namen.length ? 'inherit' : 'var(--muted, #888)';
+      sheet.appendChild(list);
+    });
+  }
 
   const close = document.createElement('button');
   close.textContent = 'Schließen';
@@ -613,7 +673,7 @@ async function setAttendance(ev, status){
     const res = await fetchWithTimeout(url.toString(), 20000);
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || 'Fehler');
-    toast('✓ Status gespeichert');
+    toast(isReminderEvent(ev) ? (status === 'dabei' ? '✓ Als erledigt markiert' : '✓ Rückgängig gemacht') : '✓ Status gespeichert');
   }catch(e){
     // Rollback, damit die Anzeige nicht etwas Ungespeichertes vortäuscht
     if(previous) meineStatusMap[evKey] = previous; else delete meineStatusMap[evKey];
@@ -630,6 +690,7 @@ function renderMeineZusagen(){
   const data = readKalCache();
   if(!data){ liste.innerHTML = '<div class="kal-empty">Termine noch nicht geladen.</div>'; return; }
   const meine = (data.events || []).filter(ev => {
+    if(isReminderEvent(ev)) return false;
     const s = meineStatusMap[getEventKey(ev)];
     return s === 'dabei' || s === 'vielleicht';
   });
