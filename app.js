@@ -433,12 +433,12 @@ function buildEventCard(ev){
   h3.textContent = ev.title || 'Ohne Titel';
   card.appendChild(h3);
 
+  // Beschreibung erscheint nur in der Detailansicht (Klick auf den Termin)
   const when = formatEventWhen(ev, true);
   const meta = document.createElement('div');
   meta.className = 'event-meta';
   if(when) addSpan(meta, '🕐 ' + when);
   if(ev.location) addSpan(meta, '📍 ' + ev.location);
-  if(ev.description) addSpan(meta, ev.description, true);
   card.appendChild(meta);
 
   const box = document.createElement('div');
@@ -485,14 +485,21 @@ function renderHausEventListe(events){
   events.forEach(ev => liste.appendChild(buildEventCard(ev)));
 }
 
-// ====== TERMIN-DETAILANSICHT ======
-function closeEventDetail(){
+// ====== TERMIN-DETAILANSICHT (Bottom-Sheet mit Animation) ======
+function closeEventDetail(immediate){
   const old = document.getElementById('eventDetailOverlay');
-  if(old) old.remove();
+  if(!old) return;
+  if(immediate === true){ old.remove(); return; }
+  // ID umbenennen, damit ein neues Sheet sofort geöffnet werden kann
+  old.id = 'eventDetailClosing';
+  old.style.opacity = '0';
+  const sh = old.firstChild;
+  if(sh) sh.style.transform = 'translateY(100%)';
+  setTimeout(function(){ old.remove(); }, 300);
 }
 
 function openEventDetail(evIn){
-  closeEventDetail();
+  closeEventDetail(true);
   const ev = findCachedEvent(evIn) || evIn;
 
   const overlay = document.createElement('div');
@@ -500,7 +507,8 @@ function openEventDetail(evIn){
   Object.assign(overlay.style, {
     position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
     background: 'rgba(0,0,0,0.6)', zIndex: '1000',
-    display: 'flex', alignItems: 'flex-end', justifyContent: 'center'
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    opacity: '0', transition: 'opacity 0.25s ease'
   });
   overlay.addEventListener('click', function(e){ if(e.target === overlay) closeEventDetail(); });
 
@@ -508,7 +516,9 @@ function openEventDetail(evIn){
   Object.assign(sheet.style, {
     background: 'var(--card, #1e1e1e)', color: 'var(--text, #eee)',
     width: '100%', maxWidth: '560px', maxHeight: '80vh', overflowY: 'auto',
-    borderRadius: '16px 16px 0 0', padding: '16px 16px 28px', boxSizing: 'border-box'
+    borderRadius: '16px 16px 0 0', padding: '16px 16px 28px', boxSizing: 'border-box',
+    transform: 'translateY(100%)',
+    transition: 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)'
   });
 
   const title = document.createElement('h3');
@@ -530,7 +540,7 @@ function openEventDetail(evIn){
   if(ev.description){
     const desc = document.createElement('div');
     desc.textContent = ev.description;
-    desc.style.fontSize = '12px';
+    desc.style.fontSize = '13px';
     desc.style.color = 'var(--muted, #aaa)';
     desc.style.marginBottom = '12px';
     desc.style.whiteSpace = 'pre-wrap';
@@ -555,11 +565,18 @@ function openEventDetail(evIn){
   const close = document.createElement('button');
   close.textContent = 'Schließen';
   Object.assign(close.style, { marginTop: '18px', width: '100%', padding: '10px', cursor: 'pointer' });
-  close.addEventListener('click', closeEventDetail);
+  close.addEventListener('click', function(){ closeEventDetail(); });
   sheet.appendChild(close);
 
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
+
+  // Startzustand rendern lassen, dann animiert einblenden
+  void sheet.offsetHeight;
+  requestAnimationFrame(function(){
+    overlay.style.opacity = '1';
+    sheet.style.transform = 'translateY(0)';
+  });
 }
 
 // ====== SETATTENDANCE (GET, wegen GAS-302-Redirect) ======
