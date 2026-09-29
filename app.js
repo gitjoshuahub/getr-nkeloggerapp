@@ -405,7 +405,7 @@ function makeBadge(text, color){
 }
 
 // Erinnerungs-Termine (z.B. AWB): nur 'Erledigt' abhaken, für alle sichtbar.
-// Nutzt intern den Status 'dabei' (kein Backend-Update nötig); 'abgesagt' hebt den eigenen Haken auf.
+// Nutzt intern den Status 'dabei'; 'rückgängig' löscht die eigene Zeile per removeattendance.
 function renderReminderControls(box, ev){
   const session = getSession();
   const me = session ? session.name.toLowerCase() : '';
@@ -420,7 +420,7 @@ function renderReminderControls(box, ev){
   styleStatusRow(box);
   box.appendChild(makeBadge('✓ Erledigt von ' + done.join(', '), 'var(--ok, #4caf50)'));
   if(done.some(n => (n || '').toLowerCase() === me)){
-    const undo = makeBtn('rückgängig', function(){ setAttendance(ev, 'abgesagt'); });
+    const undo = makeBtn('rückgängig', function(){ removeAttendance(ev); });
     styleGhostBtn(undo);
     box.appendChild(undo);
   }
@@ -673,7 +673,7 @@ async function setAttendance(ev, status){
     const res = await fetchWithTimeout(url.toString(), 20000);
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || 'Fehler');
-    toast(isReminderEvent(ev) ? (status === 'dabei' ? '✓ Als erledigt markiert' : '✓ Rückgängig gemacht') : '✓ Status gespeichert');
+    toast(isReminderEvent(ev) ? '✓ Als erledigt markiert' : '✓ Status gespeichert');
   }catch(e){
     // Rollback, damit die Anzeige nicht etwas Ungespeichertes vortäuscht
     if(previous) meineStatusMap[evKey] = previous; else delete meineStatusMap[evKey];
@@ -691,7 +691,9 @@ async function removeAttendance(ev){
   if(!session){ toast('Bitte erst anmelden.'); return; }
 
   const evKey = getEventKey(ev);
-  const previous = meineStatusMap[evKey] || null;
+  const isReminder = isReminderEvent(ev);
+  // Bei Erinnerungen kann der Haken nur aus den Server-Teilnahmen bekannt sein
+  const previous = meineStatusMap[evKey] || (isReminder ? 'dabei' : null);
   if(!previous) return;
 
   // Optimistic UI: lokal entfernen, Cache anpassen, Listen neu zeichnen
@@ -718,7 +720,7 @@ async function removeAttendance(ev){
     const res = await fetchWithTimeout(url.toString(), 20000);
     const data = await res.json();
     if(!data.ok) throw new Error(data.error || 'Fehler');
-    toast('✓ Status entfernt');
+    toast(isReminder ? '✓ Haken entfernt' : '✓ Status entfernt');
   }catch(e){
     // Rollback: alter Status kommt zurück
     meineStatusMap[evKey] = previous;
