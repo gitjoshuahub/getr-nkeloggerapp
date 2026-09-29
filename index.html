@@ -353,6 +353,38 @@
     color:var(--muted);
     font-size:14px;
   }
+
+  /* ===== PUTZPLAN / HAUSWART ===== */
+  .hw-row{
+    display:flex; align-items:center; gap:8px; margin:6px 0;
+  }
+  .hw-row .hw-name{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .hw-row input[type=checkbox], .hw-task input[type=checkbox]{
+    width:22px; height:22px; margin:0; padding:0; flex:0 0 auto; accent-color:var(--accent-haus);
+  }
+  .hw-btn{
+    flex:0 0 auto; width:auto; min-width:0; margin:0; padding:6px 12px;
+    font-size:13px; line-height:1.2; background:transparent;
+    border:1px solid var(--muted); color:var(--muted); border-radius:8px;
+  }
+  .hw-task{
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+    background:var(--card2); border:1px solid var(--border);
+    border-radius:10px; padding:8px; margin:6px 0;
+  }
+  .hw-task input[type=text]{
+    flex:1 1 100%; margin:0; padding:9px 10px; font-size:14px;
+  }
+  .hw-task select{
+    flex:1 1 auto; width:auto; min-width:0; margin:0; padding:9px 8px; font-size:14px;
+  }
+  .hw-task label{flex:0 0 auto;}
+  .hw-actions{
+    display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px;
+  }
+  .hw-actions select{
+    width:auto; max-width:45%; margin:0; padding:8px; font-size:13px;
+  }
 </style>
 </head>
 <body>
@@ -383,15 +415,15 @@
 
   <!-- Getränke: interner Tab-Header -->
   <div id="getraenke-header" class="tabbar hidden">
-    <button id="tab-log" class="active" onclick="switchTab('log')">Buchen</button>
-    <button id="tab-stand" onclick="switchTab('stand')">Stand</button>
-    <button id="tab-admin" onclick="switchTab('admin')">Admin</button>
+    <button id="tab-log" class="active" onclick="switchTab('log')">🍻 Buchen</button>
+    <button id="tab-stand" onclick="switchTab('stand')">📊 Stand</button>
+    <button id="tab-admin" onclick="switchTab('admin')">⚙️ Admin</button>
   </div>
 
   <!-- Kalender (allgemein): interner Tab-Header -->
   <div id="kalender-header" class="kal-subtabbar">
-    <button id="kaltab-termine" class="active" onclick="switchKalTab('termine')">Termine</button>
-    <button id="kaltab-meine" onclick="switchKalTab('meine')">Meine Zusagen</button>
+    <button id="kaltab-termine" class="active" onclick="switchKalTab('termine')">📅 Termine</button>
+    <button id="kaltab-meine" onclick="switchKalTab('meine')">✅ Meine Zusagen</button>
   </div>
 
   <!-- Haus: interner Tab-Header -->
@@ -440,8 +472,8 @@
     <!-- TAB: STAND -->
     <section id="view-stand" class="view hidden">
       <div class="subtabbar">
-        <button id="subtab-abrechnung" class="active" onclick="switchStandTab('abrechnung')">Abrechnung</button>
-        <button id="subtab-rangliste" onclick="switchStandTab('rangliste')">Rangliste</button>
+        <button id="subtab-abrechnung" class="active" onclick="switchStandTab('abrechnung')">🧾 Abrechnung</button>
+        <button id="subtab-rangliste" onclick="switchStandTab('rangliste')">🏆 Rangliste</button>
       </div>
       <div id="subview-abrechnung">
         <div class="card">
