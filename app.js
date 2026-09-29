@@ -28,6 +28,7 @@ const CFG_CACHE_KEY = 'bier_cfg';
 const LAGER_CACHE_KEY = 'bier_lager_cache';
 const KAL_CACHE_KEY = 'bier_kal_cache';
 const MEINE_STATUS_CACHE_KEY = 'bier_meine_status';
+const PUTZ_CACHE_KEY = 'bier_putz_cache';
 
 let zahlungSelectedName = null;
 let strafeSelectedName = null;
@@ -88,6 +89,11 @@ async function doLogin(){
   }
 }
 
+function isHauswartRole(session){
+  const r = String((session && session.rolle) || '').toLowerCase();
+  return r === 'hauswart' || r === 'admin';
+}
+
 function enterApp(session){
   document.getElementById('loginOverlay').classList.add('hidden');
   document.getElementById('appRoot').classList.remove('app-hidden');
@@ -98,6 +104,9 @@ function enterApp(session){
 
   const isAdmin = session.rolle === 'admin' || session.rolle === 'kassenwart';
   document.getElementById('tab-admin').style.display = isAdmin ? '' : 'none';
+
+  // Hauswart-Tab (dritter Tab unter Haus) nur für Hauswart und Admin
+  if(isHauswartRole(session)) ensureHauswartTab();
 
   // Haus-Tab: erst aus Cache entscheiden, nach Config-Reload synchronisieren
   document.getElementById('nav-haus').style.display = 'none';
@@ -129,6 +138,10 @@ function enterApp(session){
   loadKalender();
   loadStand(true);
   loadRangliste(true);
+
+  // Putzplan: Cache sofort zeigen, für Hausmitglieder im Hintergrund aktualisieren
+  renderPutzAufgaben();
+  if(document.getElementById('nav-haus').style.display !== 'none') loadPutzplan();
 }
 
 function restoreMeineStatus(){
@@ -168,13 +181,24 @@ function switchBereich(bereich){
   document.getElementById('haus-header').classList.toggle('hidden', bereich !== 'haus');
   const titels = { getraenke: 'Getränke', kalender: 'Kalender', haus: 'Haus' };
   document.getElementById('appTitle').textContent = titels[bereich] || '';
+  if(bereich === 'haus'){ loadPutzplan(); }
 }
 
 function switchHausTab(tab){
-  ['kalender','aufgaben'].forEach(t => {
-    document.getElementById('hausview-' + t).classList.toggle('hidden', t !== tab);
-    document.getElementById('haustab-' + t).classList.toggle('active', t === tab);
+  ['kalender','aufgaben','hauswart'].forEach(t => {
+    const v = document.getElementById('hausview-' + t);
+    const b = document.getElementById('haustab-' + t);
+    if(v) v.classList.toggle('hidden', t !== tab);
+    if(b) b.classList.toggle('active', t === tab);
   });
+  if(tab === 'aufgaben'){
+    renderPutzAufgaben();
+    loadPutzplan();
+  }
+  if(tab === 'hauswart'){
+    renderHauswart();
+    loadPutzplan().then(loadHauswart);
+  }
 }
 
 function switchKalTab(tab){
@@ -784,6 +808,486 @@ function escHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ====== PUTZPLAN ======
+let putzError = '';
+let hwState = { cfgData: null, personen: null, vorwoche: null, error: '' };
+
+function sameNameFE(a, b){
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+// Kleiner DOM-Helfer: el('div', { class, text, style, on:{click}, ... }, [children])
+function el(tag, props, children){
+  const e = document.createElement(tag);
+  if(props){
+    Object.keys(props).forEach(function(k){
+      if(k === 'text') e.textContent = props[k];
+      else if(k === 'style') Object.assign(e.style, props[k]);
+      else if(k === 'class') e.className = props[k];
+      else if(k === 'on') Object.keys(props.on).forEach(function(ev){ e.addEventListener(ev, props.on[ev]); });
+      else e[k] = props[k];
+    });
+  }
+  (children || []).forEach(function(c){ if(c) e.appendChild(c); });
+  return e;
+}
+
+function fmtDay(key){
+  if(!key) return '';
+  const p = String(key).split('-');
+  return p[2] + '.' + p[1] + '.';
+}
+
+function addDaysKey(key, n){
+  const p = String(key).split('-');
+  const d = new Date(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10) + n));
+  const m = String(d.getUTCMonth() + 1);
+  const t = String(d.getUTCDate());
+  return d.getUTCFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (t.length < 2 ? '0' + t : t);
+}
+
+function sectionTitle(text){
+  return el('div', { text: text, style: { fontWeight: '600', fontSize: '14px', margin: '16px 0 6px' } });
+}
+
+function noteLine(text, color){
+  return el('div', { text: text, style: { fontSize: '12px', color: color || 'var(--muted, #999)', margin: '4px 0' } });
+}
+
+// Alle Putzplan-Aufrufe gehen als GET an das Haus-Script
+async function hausGet(params){
+  const url = new URL(HAUS_SCRIPT_URL);
+  Object.keys(params).forEach(function(k){ url.searchParams.set(k, params[k]); });
+  url.searchParams.set('key', API_KEY);
+  const res = await fetchWithTimeout(url.toString(), 20000);
+  const data = await res.json();
+  if(!data.ok) throw new Error(data.error || 'Fehler vom Server');
+  return data;
+}
+
+function readPutzCache(){
+  try{
+    const raw = localStorage.getItem(PUTZ_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+async function loadPutzplan(){
+  if(!navigator.onLine) return;
+  try{
+    const data = await hausGet({ action: 'getputzplan' });
+    localStorage.setItem(PUTZ_CACHE_KEY, JSON.stringify({ data: data, ts: Date.now() }));
+    putzError = '';
+  }catch(e){
+    putzError = e.message || 'Fehler';
+  }
+  renderPutzAufgaben();
+  const hv = document.getElementById('hausview-hauswart');
+  if(hv && !hv.classList.contains('hidden')) renderHauswart();
+}
+
+// Aktion eines Mitglieds (name = angemeldete Person), danach Plan neu laden
+async function putzAction(action, params, okMsg){
+  const session = getSession();
+  if(!session){ toast('Bitte erst anmelden.'); return; }
+  if(!navigator.onLine){ toast('Kein Netz – bitte später erneut versuchen.'); return; }
+  try{
+    const p = Object.assign({ action: action, name: session.name }, params || {});
+    await hausGet(p);
+    if(okMsg) toast(okMsg);
+  }catch(e){
+    toast('⚠️ ' + e.message);
+  }
+  await loadPutzplan();
+}
+
+// Aktion des Hauswarts (name = Zielperson, steht in params), danach alles neu laden
+async function hwAction(action, params, okMsg){
+  const session = getSession();
+  if(!session){ toast('Bitte erst anmelden.'); return; }
+  if(!navigator.onLine){ toast('Kein Netz – bitte später erneut versuchen.'); return; }
+  try{
+    const p = Object.assign({ action: action, von: session.name }, params || {});
+    await hausGet(p);
+    if(okMsg) toast(okMsg);
+  }catch(e){
+    toast('⚠️ ' + e.message);
+  }
+  await loadPutzplan();
+  await loadHauswart();
+}
+
+function putzStatusText(s){
+  if(s === 'erledigt') return 'erledigt';
+  if(s === 'verspaetet') return 'verspätet';
+  if(s === 'nicht_erledigt') return 'nicht erledigt';
+  return 'offen';
+}
+
+// ---- Aufgaben-Tab (Mitglieder) ----
+function buildPutzTaskCard(a, me, canAct){
+  const gem = a.typ === 'gemeinschaft';
+  const card = el('div', { class: 'event-card' });
+  card.appendChild(el('h3', { text: a.aufgabe }));
+  if(gem){
+    const sub = a.urspruenglich
+      ? 'Eigentlich ' + a.urspruenglich + ' (abwesend) – jeder kann helfen'
+      : 'Für alle – wer mithilft, setzt seinen Haken';
+    card.appendChild(el('div', { class: 'event-meta' }, [el('span', { text: sub })]));
+  }
+
+  const mein = (a.haken || []).find(function(h){ return sameNameFE(h.name, me); }) || null;
+  const row = el('div');
+  styleStatusRow(row);
+
+  let text;
+  let color = 'var(--ok, #4caf50)';
+  if(gem){
+    const names = (a.haken || []).map(function(h){ return h.name + (h.puenktlich ? '' : ' (verspätet)'); });
+    text = names.length ? '✓ Geholfen: ' + names.join(', ') : 'Noch niemand abgehakt';
+    if(!names.length) color = 'var(--muted, #999)';
+  } else if(mein){
+    text = '✓ Erledigt' + (mein.puenktlich ? '' : ' (verspätet)');
+  } else if(canAct){
+    text = 'Offen';
+    color = 'var(--muted, #999)';
+  } else {
+    text = 'Nicht erledigt';
+    color = 'var(--muted, #999)';
+  }
+  row.appendChild(makeBadge(text, color));
+
+  if(canAct){
+    if(mein){
+      const undo = makeBtn(gem ? 'Haken entfernen' : 'rückgängig', function(){
+        putzAction('removeputzhaken', { aufgabe: a.aufgabe }, '✓ Haken entfernt');
+      });
+      styleGhostBtn(undo);
+      row.appendChild(undo);
+    } else {
+      row.appendChild(makeBtn(gem ? '✓ Ich habe geholfen' : '✓ Erledigt', function(){
+        putzAction('setputzhaken', { aufgabe: a.aufgabe }, '✓ Abgehakt');
+      }));
+    }
+  }
+  card.appendChild(row);
+  return card;
+}
+
+function renderPutzAufgaben(){
+  const box = document.getElementById('hausview-aufgaben');
+  if(!box) return;
+  const session = getSession();
+  box.innerHTML = '';
+  if(!session) return;
+
+  const cache = readPutzCache();
+  if(!cache){
+    box.appendChild(el('div', { class: 'kal-empty', text: putzError ? '⚠️ ' + putzError : '⏳ Lade Putzplan…' }));
+    return;
+  }
+
+  const data = cache.data;
+  const w = data.woche;
+  const jetzt = data.jetzt || {};
+  const me = session.name;
+  const canAct = !!jetzt.abhakbar && !w.abgeschlossen;
+
+  box.appendChild(el('h3', { text: 'Putzwoche ' + fmtDay(w.start) + ' – ' + fmtDay(w.ende), style: { margin: '4px 0' } }));
+
+  let info;
+  if(w.abgeschlossen) info = 'Diese Woche ist abgeschlossen. Neue Aufgaben gibt es ab Mittwoch.';
+  else if(jetzt.phase === 'verspaetet') info = 'Abhaken gilt jetzt als verspätet (möglich bis Sonntag).';
+  else info = 'Pünktlich abhaken bis Freitag (' + fmtDay(w.punktlich_bis) + ').';
+  box.appendChild(noteLine(info));
+  if(putzError){
+    box.appendChild(noteLine('⚠️ Aktualisieren fehlgeschlagen (' + putzError + ') – Stand vom ' + formatCacheTime(String(cache.ts)) + ' Uhr', '#e6a700'));
+  }
+
+  const meTeil = (w.teilnehmer || []).find(function(t){ return sameNameFE(t.name, me); });
+  if(!meTeil){
+    box.appendChild(el('div', { class: 'kal-empty', text: 'Du bist diese Woche nicht im Putzplan eingeplant.' }));
+    return;
+  }
+
+  // Meine Aufgaben
+  box.appendChild(sectionTitle('Meine Aufgaben'));
+  const mine = (w.aufgaben || []).filter(function(a){ return a.typ === 'platz' && sameNameFE(a.zustaendig, me); });
+
+  if(meTeil.abwesend){
+    box.appendChild(noteLine('Du bist diese Woche als abwesend eingetragen. Deine Aufgaben sind für alle offen. Zurücksetzen kann nur der Hauswart.'));
+  } else if(!mine.length){
+    box.appendChild(noteLine('Diese Woche hast du keine feste Aufgabe.'));
+  }
+  mine.forEach(function(a){ box.appendChild(buildPutzTaskCard(a, me, canAct)); });
+
+  const hatAbgehakt = mine.some(function(a){
+    return (a.haken || []).some(function(h){ return sameNameFE(h.name, me); });
+  });
+  if(!meTeil.abwesend && canAct && mine.length && !hatAbgehakt){
+    const abBtn = makeBtn('Ich bin diese Woche abwesend', function(){
+      if(!confirm('Wirklich für diese Woche abwesend melden? Deine Aufgaben werden zu Gemeinschaftsaufgaben, zurücksetzen kann nur der Hauswart.')) return;
+      putzAction('setputzabwesend', {}, '✓ Als abwesend eingetragen');
+    });
+    styleGhostBtn(abBtn);
+    abBtn.style.marginTop = '8px';
+    box.appendChild(abBtn);
+  }
+
+  // Gemeinschaftsaufgaben
+  const gemein = (w.aufgaben || []).filter(function(a){ return a.typ === 'gemeinschaft'; });
+  if(gemein.length){
+    box.appendChild(sectionTitle('Gemeinschaftsaufgaben'));
+    gemein.forEach(function(a){ box.appendChild(buildPutzTaskCard(a, me, canAct)); });
+  }
+
+  box.appendChild(noteLine('Stand: ' + formatCacheTime(String(cache.ts)) + ' Uhr'));
+}
+
+// ---- Hauswart-Tab ----
+// Fügt den dritten Tab 'Hauswart' neben 'Aufgaben' ein (ohne index.html anzufassen)
+function ensureHauswartTab(){
+  if(document.getElementById('haustab-hauswart')) return;
+  const tabAuf = document.getElementById('haustab-aufgaben');
+  const viewAuf = document.getElementById('hausview-aufgaben');
+  if(!tabAuf || !viewAuf || !tabAuf.parentNode || !viewAuf.parentNode) return;
+
+  const tab = tabAuf.cloneNode(true);
+  tab.id = 'haustab-hauswart';
+  tab.removeAttribute('onclick');
+  tab.textContent = 'Hauswart';
+  tab.classList.remove('active');
+  tab.addEventListener('click', function(){ switchHausTab('hauswart'); });
+  tabAuf.parentNode.insertBefore(tab, tabAuf.nextSibling);
+
+  const view = document.createElement('div');
+  view.id = 'hausview-hauswart';
+  view.className = viewAuf.className;
+  view.classList.add('hidden');
+  viewAuf.parentNode.insertBefore(view, viewAuf.nextSibling);
+}
+
+function buildHwPersonenListe(cfgData){
+  const saved = (cfgData.personen || []).slice().sort(function(a, b){
+    return (a.reihenfolge || 1e9) - (b.reihenfolge || 1e9);
+  });
+  const list = saved.map(function(p){ return { name: p.name, eingeplant: !!p.eingeplant }; });
+  (cfg.haus || []).forEach(function(n){
+    if(!list.some(function(p){ return sameNameFE(p.name, n); })) list.push({ name: n, eingeplant: false });
+  });
+  return list;
+}
+
+async function loadHauswart(){
+  hwState.error = '';
+  try{
+    const cfgData = await hausGet({ action: 'getputzconfig' });
+    hwState.cfgData = cfgData;
+    if(!hwState.personen) hwState.personen = buildHwPersonenListe(cfgData);
+  }catch(e){
+    hwState.error = e.message || 'Fehler';
+  }
+
+  const cache = readPutzCache();
+  const start = cache && cache.data && cache.data.woche ? cache.data.woche.start : null;
+  hwState.vorwoche = null;
+  if(start){
+    try{
+      const vw = await hausGet({ action: 'getputzplan', woche: addDaysKey(start, -7) });
+      hwState.vorwoche = vw.woche;
+    }catch(e){
+      hwState.vorwoche = null;
+    }
+  }
+  renderHauswart();
+}
+
+function buildHwTaskCard(a, w){
+  const gem = a.typ === 'gemeinschaft';
+  const card = el('div', { class: 'event-card' });
+  card.appendChild(el('h3', { text: a.aufgabe }));
+
+  const who = gem
+    ? (a.urspruenglich ? 'Gemeinschaft (eigentlich ' + a.urspruenglich + ')' : 'Gemeinschaft (alle)')
+    : 'Platz: ' + a.zustaendig;
+  card.appendChild(el('div', { class: 'event-meta' }, [el('span', { text: who + ' · ' + putzStatusText(a.status) })]));
+
+  (a.haken || []).forEach(function(h){
+    const row = el('div');
+    styleStatusRow(row);
+    const t = '✓ ' + h.name + ' – ' + (h.puenktlich ? 'pünktlich' : 'verspätet') +
+      (h.nachgetragen ? ' (nachgetragen von ' + h.gesetzt_von + ')' : '') + ' · ' + h.zeitpunkt;
+    row.appendChild(makeBadge(t, h.puenktlich ? 'var(--ok, #4caf50)' : '#e6a700'));
+    const rm = makeBtn('entfernen', function(){
+      hwAction('putzhakenentfernen', { name: h.name, aufgabe: a.aufgabe }, '✓ Haken entfernt');
+    });
+    styleGhostBtn(rm);
+    row.appendChild(rm);
+    card.appendChild(row);
+  });
+
+  if(a.fehlt && a.fehlt.length){
+    card.appendChild(noteLine('Nicht abgehakt: ' + a.fehlt.join(', ')));
+  }
+
+  // Nachtragen (pünktlich oder verspätet)
+  const personen = gem
+    ? (w.teilnehmer || []).map(function(t){ return t.name; })
+    : [a.zustaendig];
+  const sel = el('select', { style: { marginRight: '6px', maxWidth: '45%' } },
+    personen.map(function(n){ return el('option', { value: n, text: n }); }));
+
+  const actions = el('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', marginTop: '8px' } });
+  if(gem) actions.appendChild(sel);
+  const nachtragen = function(art){
+    const person = gem ? sel.value : a.zustaendig;
+    if(!person) return;
+    hwAction('putznachtragen', { name: person, aufgabe: a.aufgabe, art: art }, '✓ Nachgetragen');
+  };
+  const b1 = makeBtn('pünktlich nachtragen', function(){ nachtragen('puenktlich'); });
+  const b2 = makeBtn('verspätet nachtragen', function(){ nachtragen('verspaetet'); });
+  styleGhostBtn(b1);
+  styleGhostBtn(b2);
+  actions.appendChild(b1);
+  actions.appendChild(b2);
+  card.appendChild(actions);
+  return card;
+}
+
+function renderHwPersonen(container){
+  container.innerHTML = '';
+  const list = hwState.personen || [];
+  if(!list.length){
+    container.appendChild(noteLine('Keine Personen vorhanden (cfg.haus ist leer oder noch nicht geladen).'));
+    return;
+  }
+  list.forEach(function(p, i){
+    const row = el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', margin: '4px 0' } });
+    const cb = el('input', { type: 'checkbox', checked: !!p.eingeplant });
+    cb.addEventListener('change', function(){ p.eingeplant = cb.checked; });
+    row.appendChild(cb);
+    const imHaus = (cfg.haus || []).some(function(n){ return sameNameFE(n, p.name); });
+    row.appendChild(el('span', { text: (i + 1) + '. ' + p.name + (imHaus ? '' : ' (nicht in Haus-Liste)'), style: { flex: '1' } }));
+
+    const up = makeBtn('▲', function(){
+      if(i > 0){ const t = list[i - 1]; list[i - 1] = list[i]; list[i] = t; renderHwPersonen(container); }
+    });
+    const down = makeBtn('▼', function(){
+      if(i < list.length - 1){ const t = list[i + 1]; list[i + 1] = list[i]; list[i] = t; renderHwPersonen(container); }
+    });
+    styleGhostBtn(up);
+    styleGhostBtn(down);
+    row.appendChild(up);
+    row.appendChild(down);
+    container.appendChild(row);
+  });
+  container.appendChild(noteLine('Häkchen = eingeplant. Die Reihenfolge bestimmt die Rotation. Änderungen gelten ab der nächsten Putzwoche.'));
+  const save = makeBtn('Personen speichern', function(){ hwSavePersonen(); });
+  save.style.marginTop = '8px';
+  container.appendChild(save);
+}
+
+async function hwSavePersonen(){
+  const personen = (hwState.personen || []).map(function(p){
+    return { name: p.name, eingeplant: p.eingeplant ? 'ja' : 'nein' };
+  });
+  if(!personen.some(function(p){ return p.eingeplant === 'ja'; })){
+    toast('Bitte mindestens eine Person einplanen.');
+    return;
+  }
+  try{
+    await hausGet({ action: 'saveputzplan', personen: JSON.stringify(personen) });
+    toast('✓ Gespeichert – gilt ab der nächsten Woche');
+    hwState.personen = null;
+  }catch(e){
+    toast('⚠️ ' + e.message);
+  }
+  await loadHauswart();
+}
+
+function renderHauswart(){
+  const box = document.getElementById('hausview-hauswart');
+  if(!box) return;
+  box.innerHTML = '';
+
+  const cache = readPutzCache();
+  if(!cache){
+    box.appendChild(el('div', { class: 'kal-empty', text: putzError ? '⚠️ ' + putzError : '⏳ Lade…' }));
+    return;
+  }
+  const w = cache.data.woche;
+
+  box.appendChild(el('h3', { text: 'Hauswart – Woche ' + fmtDay(w.start) + ' – ' + fmtDay(w.ende), style: { margin: '4px 0' } }));
+  if(hwState.error) box.appendChild(noteLine('⚠️ ' + hwState.error, '#e6a700'));
+  if(putzError) box.appendChild(noteLine('⚠️ ' + putzError, '#e6a700'));
+
+  // Diese Woche
+  box.appendChild(sectionTitle('Diese Woche'));
+  (w.aufgaben || []).forEach(function(a){ box.appendChild(buildHwTaskCard(a, w)); });
+  if(!(w.aufgaben || []).length) box.appendChild(noteLine('Keine Aufgaben in dieser Woche.'));
+
+  // Anwesenheit
+  box.appendChild(sectionTitle('Anwesenheit'));
+  (w.teilnehmer || []).forEach(function(t){
+    const row = el('div');
+    styleStatusRow(row);
+    row.appendChild(makeBadge('Platz ' + t.platz + ' · ' + t.name + (t.abwesend ? ' – abwesend' : ''), t.abwesend ? '#e6a700' : 'inherit'));
+    const btn = t.abwesend
+      ? makeBtn('zurücksetzen', function(){ hwAction('resetputzabwesend', { name: t.name }, '✓ Abwesenheit zurückgesetzt'); })
+      : makeBtn('abwesend setzen', function(){ hwAction('putzabwesendsetzen', { name: t.name }, '✓ Als abwesend eingetragen'); });
+    styleGhostBtn(btn);
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+  if((w.frei || []).length) box.appendChild(noteLine('Ohne feste Aufgabe: ' + w.frei.join(', ')));
+
+  // 'alle'-Aufgaben ein-/ausschalten
+  const alleCfg = ((hwState.cfgData && hwState.cfgData.aufgaben) || []).filter(function(a){ return a.platz === 'alle'; });
+  if(alleCfg.length){
+    box.appendChild(sectionTitle('Aufgaben für alle (diese Woche)'));
+    alleCfg.forEach(function(c){
+      const inWeek = (w.aufgaben || []).some(function(a){
+        return a.typ === 'gemeinschaft' && !a.urspruenglich && sameNameFE(a.aufgabe, c.aufgabe);
+      });
+      const row = el('div');
+      styleStatusRow(row);
+      row.appendChild(makeBadge(c.aufgabe + (inWeek ? ' – aktiv' : ' – aus'), inWeek ? 'var(--ok, #4caf50)' : 'var(--muted, #999)'));
+      const btn = makeBtn(inWeek ? 'ausschalten' : 'einschalten', function(){
+        hwAction('setputzgemeinschaft', { aufgabe: c.aufgabe, an: inWeek ? '0' : '1' }, inWeek ? '✓ Ausgeschaltet' : '✓ Eingeschaltet');
+      });
+      styleGhostBtn(btn);
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  // Vorwoche (Dokumentation)
+  box.appendChild(sectionTitle('Vorwoche'));
+  const vw = hwState.vorwoche;
+  if(!vw){
+    box.appendChild(noteLine('Für die Vorwoche gibt es keine Daten.'));
+  } else {
+    box.appendChild(noteLine('Woche ' + fmtDay(vw.start) + ' – ' + fmtDay(vw.ende)));
+    const probleme = (vw.aufgaben || []).filter(function(a){ return a.status === 'nicht_erledigt' || a.status === 'verspaetet'; });
+    if(!probleme.length) box.appendChild(noteLine('✓ Alles pünktlich erledigt.', 'var(--ok, #4caf50)'));
+    (vw.aufgaben || []).forEach(function(a){
+      const gem = a.typ === 'gemeinschaft';
+      const wer = gem ? 'Gemeinschaft' : a.zustaendig;
+      const helfer = (a.haken || []).map(function(h){ return h.name + (h.puenktlich ? '' : ' (verspätet)'); });
+      const zeile = a.aufgabe + ' – ' + wer + ' – ' + putzStatusText(a.status) + (helfer.length ? ' · ' + helfer.join(', ') : '');
+      const bad = a.status === 'nicht_erledigt';
+      const late = a.status === 'verspaetet';
+      box.appendChild(noteLine(zeile, bad ? '#e05353' : (late ? '#e6a700' : 'var(--muted, #999)')));
+    });
+  }
+
+  // Personen und Reihenfolge
+  box.appendChild(sectionTitle('Personen und Reihenfolge'));
+  const personenBox = el('div');
+  box.appendChild(personenBox);
+  renderHwPersonen(personenBox);
+}
+
 // ====== STATUS / OFFLINE ======
 function updateQueueBadge(){
   const b = document.getElementById('queueBadge');
@@ -1022,15 +1526,15 @@ async function logBuchung(anzahl, typ){
 function renderAdminNameLists(){
   const allePersonen = [...cfg.haus, ...cfg.nonloci];
   ['zahlungNameList','strafeNameList'].forEach(listId => {
-    const el = document.getElementById(listId);
-    if(!el) return;
-    el.innerHTML = '';
+    const elx = document.getElementById(listId);
+    if(!elx) return;
+    elx.innerHTML = '';
     const typ = listId.startsWith('zahlung') ? 'zahlung' : 'strafe';
     allePersonen.forEach(name => {
       const b = document.createElement('button');
       b.textContent = name;
       b.onclick = () => selectAdminName(typ, name, b);
-      el.appendChild(b);
+      elx.appendChild(b);
     });
   });
 }
