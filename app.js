@@ -30,6 +30,9 @@ let aktuellerBereich = "kalender";
 let meineStatusMap = {};
 let kalViewDate = new Date();
 
+// Globaler Lookup für Events (verhindert JSON-Escape-Probleme im onclick)
+let _eventsLookup = {};
+
 function getEventKey(ev) {
   return [ev.calendar || "", ev.id || "", ev.start || "", ev.title || ""].join("|");
 }
@@ -263,6 +266,10 @@ async function loadKalender(){
 function renderEventListe(events){
   const liste = document.getElementById("kalenderListe");
   renderKalMonthNav();
+  
+  // Lookup zurücksetzen
+  _eventsLookup = {};
+  
   if(!events || events.length === 0){
     liste.innerHTML = '<div class="kal-empty">Keine Termine in diesem Monat.</div>';
     return;
@@ -279,8 +286,8 @@ function renderEventListe(events){
     const evKey = getEventKey(ev);
     const currentStatus = meineStatusMap[evKey] || null;
     
-    // Event-Objekt sicher serialisieren (verhindert Syntax-Fehler bei Special Chars)
-    const evJson = JSON.stringify(ev).replace(/"/g, "&quot;");
+    // Event im globalen Lookup speichern
+    _eventsLookup[evKey] = ev;
     
     card.innerHTML = `
       <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
@@ -290,9 +297,9 @@ function renderEventListe(events){
         ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
       </div>
       <div class="event-actions" id="evact-${escHtml(evKey)}">
-        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'dabei', this)">✅ Dabei</button>
-        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'vielleicht', this)">❔ Evtl.</button>
-        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'abgesagt', this)">❌ Absage</button>
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'abgesagt', this)">❌ Absage</button>
       </div>
       ${ev.teilnehmer && ev.teilnehmer.length ? '<div class="event-teilnehmer">👥 ' + ev.teilnehmer.map(t=>escHtml(t)).join(', ') + '</div>' : ''}
     `;
@@ -353,6 +360,10 @@ function renderHausEventListe(events){
   const liste = document.getElementById("hausKalenderListe");
   if(!liste) return;
   renderKalMonthNav();
+  
+  // Lookup zurücksetzen
+  _eventsLookup = {};
+  
   if(!events || events.length === 0){
     liste.innerHTML = '<div class="kal-empty">Keine Haus-Termine in diesem Monat.</div>';
     return;
@@ -369,7 +380,8 @@ function renderHausEventListe(events){
     const evKey = getEventKey(ev);
     const currentStatus = meineStatusMap[evKey] || null;
     
-    const evJson = JSON.stringify(ev).replace(/"/g, "&quot;");
+    // Event im globalen Lookup speichern
+    _eventsLookup[evKey] = ev;
     
     card.innerHTML = `
       <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
@@ -379,13 +391,23 @@ function renderHausEventListe(events){
         ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
       </div>
       <div class="event-actions" id="evact-haus-${escHtml(evKey)}">
-        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'dabei', this)">✅ Dabei</button>
-        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'vielleicht', this)">❔ Evtl.</button>
-        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'abgesagt', this)">❌ Absage</button>
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendanceBy('${escHtml(evKey)}', 'abgesagt', this)">❌ Absage</button>
       </div>
     `;
     liste.appendChild(card);
   });
+}
+
+// Wrapper-Funktion: Holt Event aus Lookup und ruft setAttendance auf
+function setAttendanceBy(evKey, status, btn){
+  const ev = _eventsLookup[evKey];
+  if(!ev){
+    toast("⚠️ Event nicht gefunden");
+    return;
+  }
+  setAttendance(ev, status, btn);
 }
 
 async function setAttendance(ev, status, btn){
