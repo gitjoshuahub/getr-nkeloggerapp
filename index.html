@@ -417,7 +417,7 @@
   <div id="getraenke-header" class="tabbar hidden">
     <button id="tab-log" class="active" onclick="switchTab('log')">🍻 Buchen</button>
     <button id="tab-stand" onclick="switchTab('stand')">📊 Stand</button>
-    <button id="tab-admin" onclick="switchTab('admin')">⚙️ Admin</button>
+    <button id="tab-admin" onclick="switchTab('admin')">👷 Kassenwart</button>
   </div>
 
   <!-- Kalender (allgemein): interner Tab-Header -->
@@ -631,5 +631,21 @@
 <div id="toast"></div>
 
 <script src="app.js"></script>
+<script src="admin.js"></script>
+<script>
+  // Admin-Knopf (wird von admin.js angelegt) wie die anderen Knöpfe darstellen: Icon oben, Text darunter
+  (function(){
+    var nav = document.getElementById('bottomNav');
+    if(!nav || !window.MutationObserver) return;
+    function fix(){
+      var b = document.getElementById('nav-admin');
+      if(b && !b.querySelector('.nav-icon')){
+        b.innerHTML = '<span class="nav-icon">⚙️</span>Admin';
+      }
+    }
+    new MutationObserver(fix).observe(nav, { childList: true });
+    fix();
+  })();
+</script>
 </body>
 </html>
