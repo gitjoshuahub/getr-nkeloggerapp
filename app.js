@@ -130,6 +130,7 @@ function enterApp(session){
     const cachedPutz = readPutzCache();
     if(cachedPutz && cachedPutz.data){ putzData = cachedPutz.data; renderPutzplan(); }
     if(isHausMember(session)) loadPutzplan();
+    if(isHauswartSession(session)) loadHauswartPanel();
   }catch(e){ console.error('Putzplan-Init fehlgeschlagen', e); }
 
   // Alles aus dem Cache anzeigen, im Hintergrund neu laden
@@ -1268,11 +1269,17 @@ function switchTab(tab){
 // PUTZPLAN (Aufgaben-Tab) + HAUSWART-TAB
 // ====================================================
 const PUTZ_CACHE_KEY = 'bier_putz_cache';
+const HW_CACHE_KEY = 'bier_hw_cache';
 let putzData = null;        // letzte Antwort von getputzplan
 let putzHint = '';
 let hauswartConfig = null;  // Antwort von getputzconfig
 let hauswartPrev = null;    // Vorwoche (Ansicht)
-let hwPersonen = [];        // Editor-Zustand: [{name, eingeplant}]
+let hwPersonen = [];        // Editor: [{name, eingeplant}], Reihenfolge = Rotation
+let hwAufgaben = [];        // Editor: [{aufgabe, platz: 'alle' | Zahl, aktiv}]
+let hwDirty = false;        // ungespeicherte Änderungen im Editor
+let hwStateReady = false;
+let hwLoading = false;
+let hwReloadAgain = false;
 
 function isHauswartSession(session){
   return !!session && (session.rolle === 'hauswart' || session.rolle === 'admin');
@@ -1319,6 +1326,17 @@ function writePutzCache(data){
   try{ localStorage.setItem(PUTZ_CACHE_KEY, JSON.stringify({ data: data, ts: Date.now() })); }catch(e){}
 }
 
+function readHwCache(){
+  try{
+    const raw = localStorage.getItem(HW_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+function writeHwCache(config, prev){
+  try{ localStorage.setItem(HW_CACHE_KEY, JSON.stringify({ config: config, prev: prev, ts: Date.now() })); }catch(e){}
+}
+
 // Kleine Helfer zum Bauen von DOM-Elementen
 function mk(tag, text, style){
   const e = document.createElement(tag);
@@ -1328,7 +1346,7 @@ function mk(tag, text, style){
 }
 
 function mkTitle(text){
-  return mk('div', text, { fontWeight: '600', fontSize: '15px', margin: '14px 0 6px' });
+  return mk('div', text, { fontWeight: '600', fontSize: '15px', margin: '16px 0 6px' });
 }
 
 function mkInfo(text){
@@ -1347,6 +1365,13 @@ async function putzApi(action, params){
   const data = await res.json();
   if(!data.ok) throw new Error(data.error || 'Fehler');
   return data;
+}
+
+function putzStatusText(s){
+  return s === 'erledigt' ? 'Erledigt'
+    : s === 'verspaetet' ? 'Verspätet'
+    : s === 'nicht_erledigt' ? 'Nicht erledigt'
+    : 'Offen';
 }
 
 function putzStatusLabel(s){
@@ -1481,7 +1506,7 @@ function renderPutzplan(){
   } else if(!mine.length){
     root.appendChild(mkInfo('Diese Woche hast du keine feste Aufgabe.'));
   } else {
-    mine.forEach(t => root.appendChild(buildPutzTaskCard(t, me, canAct)));
+    mine.forEach(t => root.appendChild(buildPutzRow(t, me, canAct)));
   }
 
   if(!myTeil.abwesend && canAct && mine.length){
@@ -1496,71 +1521,76 @@ function renderPutzplan(){
 
   if(gem.length){
     root.appendChild(mkTitle('Gemeinschaftsaufgaben'));
-    root.appendChild(mkInfo('Jede Person, die mitgeholfen hat, setzt ihren eigenen Haken.'));
-    gem.forEach(t => root.appendChild(buildPutzTaskCard(t, me, canAct)));
+    root.appendChild(mkInfo('Wer mitgeholfen hat, setzt seinen eigenen Haken.'));
+    gem.forEach(t => root.appendChild(buildPutzRow(t, me, canAct)));
   }
 
   if(putzHint) root.appendChild(mkInfo(putzHint));
 }
 
-function buildPutzTaskCard(task, me, canAct){
+// Eine Zeile pro Aufgabe: Name + Status links, Häkchen-Kästchen immer in derselben Spalte rechts
+function buildPutzRow(task, me, canAct){
+  const mein = (task.haken || []).find(h => sameNameJs(h.name, me));
+  const checked = !!mein;
+
   const card = document.createElement('div');
   card.className = 'event-card';
+  Object.assign(card.style, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' });
 
-  let title = task.aufgabe;
-  if(task.urspruenglich) title += '  (eigentlich ' + task.urspruenglich + ')';
-  card.appendChild(mk('h3', title));
+  const left = document.createElement('div');
+  Object.assign(left.style, { flex: '1 1 auto', minWidth: '0' });
+  left.appendChild(mk('div', task.aufgabe, { fontWeight: '600', fontSize: '15px' }));
 
-  const row = document.createElement('div');
-  styleStatusRow(row);
-
-  const mein = (task.haken || []).find(h => sameNameJs(h.name, me));
-  let text;
+  let sub;
   let color;
   if(task.typ === 'platz'){
     if(mein){
-      text = '✓ Erledigt' + (mein.puenktlich ? '' : ' · verspätet') + (mein.nachgetragen ? ' · nachgetragen' : '');
+      sub = (mein.puenktlich ? 'Erledigt' : 'Verspätet erledigt') + (mein.nachgetragen ? ' · nachgetragen' : '');
       color = mein.puenktlich ? 'var(--ok, #4caf50)' : '#e0a030';
     } else {
-      text = putzStatusLabel(task.status);
+      sub = putzStatusText(task.status);
       color = putzStatusColor(task.status);
     }
   } else {
     const namen = (task.haken || []).map(h => h.name + (h.puenktlich ? '' : ' (verspätet)'));
-    text = namen.length ? '✓ Erledigt von ' + namen.join(', ') : putzStatusLabel(task.status);
-    color = namen.length ? 'var(--ok, #4caf50)' : putzStatusColor(task.status);
+    sub = (task.urspruenglich ? 'Eigentlich ' + task.urspruenglich + ' · ' : '') +
+      (namen.length ? 'Erledigt von ' + namen.join(', ') : 'Noch niemand');
+    color = namen.length ? 'var(--ok, #4caf50)' : 'var(--muted, #aaa)';
   }
-  row.appendChild(makeBadge(text, color));
+  left.appendChild(mk('div', sub, { fontSize: '12px', color: color, marginTop: '2px' }));
+  card.appendChild(left);
 
-  if(canAct){
-    if(mein){
-      const undo = makeBtn('rückgängig', function(){ putzToggleHaken(task.aufgabe, false); });
-      styleGhostBtn(undo);
-      row.appendChild(undo);
-    } else {
-      const label = task.typ === 'gemeinschaft' ? '✓ Ich habe geholfen' : '✓ Erledigt';
-      row.appendChild(makeBtn(label, function(){ putzToggleHaken(task.aufgabe, true); }));
-    }
-  }
-
-  card.appendChild(row);
+  const box = document.createElement('button');
+  box.textContent = checked ? '✓' : '';
+  Object.assign(box.style, {
+    flex: '0 0 44px', width: '44px', height: '44px', margin: '0', padding: '0',
+    fontSize: '22px', lineHeight: '1', borderRadius: '10px',
+    cursor: canAct ? 'pointer' : 'default', opacity: canAct ? '1' : '0.5',
+    border: '1px solid ' + (checked ? 'var(--ok, #4caf50)' : 'var(--muted, #888)'),
+    background: checked ? 'var(--ok, #4caf50)' : 'transparent',
+    color: checked ? '#fff' : 'var(--muted, #aaa)'
+  });
+  box.disabled = !canAct;
+  box.addEventListener('click', function(e){
+    e.stopPropagation();
+    putzToggleHaken(task.aufgabe, !checked);
+  });
+  card.appendChild(box);
   return card;
 }
 
-// Lokale, optimistische Änderung eines Hakens in putzData
-function putzApplyHakenLocal(aufgabe, name, set){
-  if(!putzData || !putzData.woche) return;
-  const w = putzData.woche;
-  const punkt = (putzData.jetzt && putzData.jetzt.phase) === 'punktlich';
-  (w.aufgaben || []).forEach(t => {
+// Lokale, optimistische Änderung eines Hakens in einer Woche
+function putzApplyHakenLocal(week, aufgabe, name, art, nachgetragen){
+  if(!week) return;
+  (week.aufgaben || []).forEach(t => {
     if(!sameNameJs(t.aufgabe, aufgabe)) return;
     t.haken = (t.haken || []).filter(h => !sameNameJs(h.name, name));
-    if(set){
-      t.haken.push({ name: name, zeitpunkt: '', puenktlich: punkt, nachgetragen: false, gesetzt_von: name });
+    if(art){
+      t.haken.push({ name: name, zeitpunkt: '', puenktlich: art === 'puenktlich', nachgetragen: !!nachgetragen, gesetzt_von: name });
     }
-    t.status = putzTaskStatus(t, !!w.abgeschlossen);
+    t.status = putzTaskStatus(t, !!week.abgeschlossen);
     if(t.typ === 'gemeinschaft' && !t.urspruenglich){
-      t.fehlt = (w.teilnehmer || [])
+      t.fehlt = (week.teilnehmer || [])
         .filter(p => !p.abwesend && !t.haken.some(h => sameNameJs(h.name, p.name)))
         .map(p => p.name);
     }
@@ -1573,7 +1603,8 @@ async function putzToggleHaken(aufgabe, set){
   if(!navigator.onLine){ toast('Offline – Abhaken braucht eine Verbindung.'); return; }
 
   const before = JSON.stringify(putzData);
-  putzApplyHakenLocal(aufgabe, session.name, set);
+  const punkt = (putzData && putzData.jetzt && putzData.jetzt.phase) === 'punktlich';
+  putzApplyHakenLocal(putzData ? putzData.woche : null, aufgabe, session.name, set ? (punkt ? 'puenktlich' : 'verspaetet') : null, false);
   writePutzCache(putzData);
   renderPutzplan();
 
@@ -1603,16 +1634,36 @@ async function putzSetAbwesend(){
   }
 }
 
-// ---- Hauswart-Tab ----
+// ---- Hauswart-Tab: Laden (erst Cache, dann Hintergrund) ----
+function hwCanRerender(){
+  if(hwDirty) return false;
+  const a = document.activeElement;
+  return !(a && (a.tagName === 'INPUT' || a.tagName === 'SELECT'));
+}
+
 async function loadHauswartPanel(){
   const root = document.getElementById('hauswartRoot');
   if(!root) return;
-  if(!root.firstChild) root.appendChild(mkInfo('⏳ Lade …'));
-  if(!navigator.onLine){
-    root.innerHTML = '';
-    root.appendChild(mkInfo('Offline – der Hauswart-Bereich braucht eine Verbindung.'));
-    return;
+
+  if(!hauswartConfig){
+    const c = readHwCache();
+    if(c && c.config){ hauswartConfig = c.config; hauswartPrev = c.prev || null; }
   }
+  if(!putzData){
+    const pc = readPutzCache();
+    if(pc && pc.data) putzData = pc.data;
+  }
+  if(putzData && hauswartConfig){
+    if(!hwStateReady || !hwDirty) hwBuildEditorState();
+    if(hwCanRerender() || !root.firstChild) renderHauswartPanel();
+  } else if(!root.firstChild){
+    root.appendChild(mkInfo('⏳ Lade …'));
+  }
+
+  if(!navigator.onLine) return;
+  if(hwLoading){ hwReloadAgain = true; return; }
+  hwLoading = true;
+
   try{
     const res = await Promise.all([ putzApi('getputzplan', {}), putzApi('getputzconfig', {}) ]);
     putzData = res[0];
@@ -1624,45 +1675,85 @@ async function loadHauswartPanel(){
     }catch(e){
       hauswartPrev = null;
     }
-    hwPersonen = hwBuildPersonenState();
-    renderHauswartPanel();
+    writeHwCache(hauswartConfig, hauswartPrev);
+    if(!hwDirty) hwBuildEditorState();
+    if(hwCanRerender()) renderHauswartPanel();
     renderPutzplan();
   }catch(e){
-    root.innerHTML = '';
-    root.appendChild(mkInfo('⚠️ ' + e.message));
+    if(!(putzData && hauswartConfig)){
+      root.innerHTML = '';
+      root.appendChild(mkInfo('⚠️ ' + e.message));
+    }
+  } finally {
+    hwLoading = false;
+    if(hwReloadAgain){ hwReloadAgain = false; loadHauswartPanel(); }
   }
 }
 
-function hwBuildPersonenState(){
+// Editor-Zustand aus Server-Konfiguration + Hausliste aufbauen
+function hwBuildEditorState(){
   const conf = ((hauswartConfig && hauswartConfig.personen) || []).slice();
   conf.sort((a, b) => (a.reihenfolge || 1e9) - (b.reihenfolge || 1e9));
   const seen = {};
-  const out = [];
+  const ein = [];
+  const aus = [];
   conf.forEach(p => {
     const k = String(p.name).toLowerCase();
     if(seen[k]) return;
     seen[k] = true;
-    out.push({ name: p.name, eingeplant: !!p.eingeplant });
+    (p.eingeplant ? ein : aus).push({ name: p.name, eingeplant: !!p.eingeplant });
   });
   (cfg.haus || []).forEach(n => {
     const k = String(n).toLowerCase();
     if(seen[k]) return;
     seen[k] = true;
-    out.push({ name: n, eingeplant: false });
+    aus.push({ name: n, eingeplant: false });
   });
-  return out;
+  hwPersonen = ein.concat(aus);
+  hwAufgaben = ((hauswartConfig && hauswartConfig.aufgaben) || []).map(a => ({ aufgabe: a.aufgabe, platz: a.platz, aktiv: !!a.aktiv }));
+  hwStateReady = true;
+  hwDirty = false;
 }
 
+// Aktion im Hintergrund, danach Daten neu holen
 async function hwAction(action, params, okText){
   try{
     await putzApi(action, params);
     toast('✓ ' + okText);
-    await loadHauswartPanel();
+    loadHauswartPanel();
   }catch(e){
     toast('⚠️ ' + e.message);
   }
 }
 
+// Haken nachtragen (art = 'puenktlich' | 'verspaetet') oder entfernen (art = null), sofort sichtbar
+async function hwHakenAction(week, aufgabe, name, art){
+  const before = JSON.stringify({ p: putzData, v: hauswartPrev });
+  putzApplyHakenLocal(week, aufgabe, name, art, true);
+  if(putzData) writePutzCache(putzData);
+  renderHauswartPanel();
+
+  try{
+    if(art){
+      const von = (getSession() || {}).name || 'Hauswart';
+      await putzApi('putznachtragen', { name: name, aufgabe: aufgabe, art: art, woche: week.start, von: von });
+      toast('✓ Nachgetragen');
+    } else {
+      await putzApi('putzhakenentfernen', { name: name, aufgabe: aufgabe, woche: week.start });
+      toast('✓ Haken entfernt');
+    }
+    loadHauswartPanel();
+  }catch(e){
+    const b = JSON.parse(before);
+    putzData = b.p;
+    hauswartPrev = b.v;
+    if(putzData) writePutzCache(putzData);
+    renderHauswartPanel();
+    toast('⚠️ ' + e.message);
+  }
+}
+
+// ---- Hauswart-Tab: Darstellung ----
 function renderHauswartPanel(){
   const root = document.getElementById('hauswartRoot');
   if(!root || !putzData || !putzData.woche) return;
@@ -1671,15 +1762,11 @@ function renderHauswartPanel(){
   root.innerHTML = '';
   root.appendChild(mkTitle('Hauswart · Woche ' + fmtDay(w.start) + ' – ' + fmtDay(w.ende)));
   root.appendChild(mkInfo(putzPhaseText(putzData.jetzt || {}, w)));
-  const reload = makeBtn('Neu laden', loadHauswartPanel);
-  styleGhostBtn(reload);
-  root.appendChild(reload);
 
   appendAdminAlleToggles(root);
 
   root.appendChild(mkTitle('Diese Woche'));
   appendAdminWeek(root, w);
-
   appendAdminPersonen(root, w);
 
   root.appendChild(mkTitle('Vorwoche'));
@@ -1689,18 +1776,23 @@ function renderHauswartPanel(){
     root.appendChild(mkInfo('Keine Vorwoche gespeichert.'));
   }
 
-  appendAdminEditor(root);
+  root.appendChild(mkTitle('Putzplan für die nächste Woche'));
+  root.appendChild(mkInfo('Änderungen hier gelten ab der nächsten Putzwoche (Mittwoch).'));
+  const box = document.createElement('div');
+  box.id = 'hwEditorBox';
+  root.appendChild(box);
+  renderHwEditor();
 }
 
 function appendAdminAlleToggles(root){
-  const alle = ((hauswartConfig && hauswartConfig.aufgaben) || []).filter(a => a.platz === 'alle');
+  const alle = ((hauswartConfig && hauswartConfig.aufgaben) || []).filter(a => a.platz === 'alle' && a.aktiv);
   if(!alle.length) return;
   root.appendChild(mkTitle('Aufgaben für alle (diese Woche)'));
   alle.forEach(a => {
     const aktiv = (putzData.woche.aufgaben || []).some(t => sameNameJs(t.aufgabe, a.aufgabe));
     const row = document.createElement('div');
     styleStatusRow(row);
-    row.appendChild(mk('span', a.aufgabe + (aktiv ? ' · eingeschaltet' : ' · aus'), { fontSize: '13px' }));
+    row.appendChild(mk('span', a.aufgabe + (aktiv ? '' : ' (diese Woche aus)'), { fontSize: '14px' }));
     const b = makeBtn(aktiv ? 'ausschalten' : 'einschalten', function(){
       hwAction('setputzgemeinschaft', { aufgabe: a.aufgabe, an: aktiv ? '0' : '1' }, aktiv ? 'Ausgeschaltet' : 'Eingeschaltet');
     });
@@ -1711,13 +1803,6 @@ function appendAdminAlleToggles(root){
 }
 
 function appendAdminWeek(root, week){
-  const counts = { erledigt: 0, verspaetet: 0, nicht_erledigt: 0, offen: 0 };
-  (week.aufgaben || []).forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1; });
-  root.appendChild(mkInfo(
-    fmtDay(week.start) + ' – ' + fmtDay(week.ende) + ': ' +
-    counts.erledigt + ' erledigt, ' + counts.verspaetet + ' verspätet, ' +
-    counts.nicht_erledigt + ' nicht erledigt, ' + counts.offen + ' offen'
-  ));
   if(!(week.aufgaben || []).length){
     root.appendChild(mkInfo('Keine Aufgaben in dieser Woche.'));
     return;
@@ -1729,40 +1814,43 @@ function buildAdminTaskCard(task, week){
   const card = document.createElement('div');
   card.className = 'event-card';
 
-  let title = task.aufgabe;
-  if(task.typ === 'platz'){
-    title += ' → ' + task.zustaendig;
-  } else {
-    title += ' · Gemeinschaft' + (task.urspruenglich ? ' (eigentlich ' + task.urspruenglich + ')' : '');
-  }
-  card.appendChild(mk('h3', title));
-  card.appendChild(mk('div', putzStatusLabel(task.status), { fontSize: '13px', color: putzStatusColor(task.status), margin: '2px 0 6px' }));
+  const who = task.typ === 'platz'
+    ? task.zustaendig
+    : 'alle' + (task.urspruenglich ? ' (eigentlich ' + task.urspruenglich + ')' : '');
+
+  const head = document.createElement('div');
+  styleStatusRow(head);
+  head.style.marginTop = '0';
+  const left = document.createElement('div');
+  left.appendChild(mk('div', task.aufgabe, { fontWeight: '600', fontSize: '15px' }));
+  left.appendChild(mk('div', who, { fontSize: '12px', color: 'var(--muted, #aaa)' }));
+  head.appendChild(left);
+  head.appendChild(mk('span', putzStatusLabel(task.status), { fontSize: '13px', color: putzStatusColor(task.status), whiteSpace: 'nowrap' }));
+  card.appendChild(head);
 
   (task.haken || []).forEach(h => {
     const row = document.createElement('div');
     styleStatusRow(row);
-    row.style.marginTop = '4px';
+    row.style.marginTop = '6px';
     const txt = h.name + ' · ' + (h.puenktlich ? 'pünktlich' : 'verspätet') +
       (h.zeitpunkt ? ' · ' + h.zeitpunkt : '') + (h.nachgetragen ? ' · nachgetragen' : '');
     row.appendChild(mk('span', txt, { fontSize: '12px' }));
-    const rm = makeBtn('entfernen', function(){
-      hwAction('putzhakenentfernen', { name: h.name, aufgabe: task.aufgabe, woche: week.start }, 'Haken entfernt');
-    });
+    const rm = makeBtn('entfernen', function(){ hwHakenAction(week, task.aufgabe, h.name, null); });
     styleGhostBtn(rm);
     row.appendChild(rm);
     card.appendChild(row);
   });
 
   if(task.fehlt && task.fehlt.length){
-    card.appendChild(mk('div', 'Nicht abgehakt: ' + task.fehlt.join(', '), { fontSize: '12px', color: '#e0a030', marginTop: '4px' }));
+    card.appendChild(mk('div', 'Noch nicht abgehakt: ' + task.fehlt.join(', '), { fontSize: '12px', color: '#e0a030', marginTop: '6px' }));
   }
 
-  // Nachtragen: bei Platz-Aufgaben für die zuständige Person, bei Gemeinschaft für eine wählbare Person
+  // Nachtragen: Platz-Aufgabe für die zuständige Person, Gemeinschaft für eine wählbare Person
   let kandidaten = [];
   if(task.typ === 'platz'){
     if(!(task.haken || []).length && task.zustaendig) kandidaten = [task.zustaendig];
   } else {
-    kandidaten = (week.teilnehmer || []).map(p => p.name)
+    kandidaten = (week.teilnehmer || []).filter(p => !p.abwesend).map(p => p.name)
       .filter(n => !(task.haken || []).some(h => sameNameJs(h.name, n)));
   }
 
@@ -1770,9 +1858,10 @@ function buildAdminTaskCard(task, week){
     const row = document.createElement('div');
     styleStatusRow(row);
     row.style.flexWrap = 'wrap';
-    row.style.justifyContent = 'flex-start';
-    row.appendChild(mk('span', kandidaten.length === 1 ? 'Nachtragen für ' + kandidaten[0] + ':' : 'Nachtragen:', { fontSize: '12px' }));
 
+    const leftBox = document.createElement('div');
+    Object.assign(leftBox.style, { display: 'flex', alignItems: 'center', gap: '8px' });
+    leftBox.appendChild(mk('span', 'Nachtragen', { fontSize: '12px' }));
     let sel = null;
     if(kandidaten.length > 1){
       sel = document.createElement('select');
@@ -1782,21 +1871,22 @@ function buildAdminTaskCard(task, week){
         o.textContent = n;
         sel.appendChild(o);
       });
-      row.appendChild(sel);
+      leftBox.appendChild(sel);
+    } else {
+      leftBox.appendChild(mk('span', 'für ' + kandidaten[0], { fontSize: '12px' }));
     }
+    row.appendChild(leftBox);
 
     const nameOf = function(){ return sel ? sel.value : kandidaten[0]; };
-    const von = (getSession() || {}).name || 'Hauswart';
-    const b1 = makeBtn('pünktlich', function(){
-      hwAction('putznachtragen', { name: nameOf(), aufgabe: task.aufgabe, art: 'puenktlich', woche: week.start, von: von }, 'Nachgetragen');
-    });
-    const b2 = makeBtn('verspätet', function(){
-      hwAction('putznachtragen', { name: nameOf(), aufgabe: task.aufgabe, art: 'verspaetet', woche: week.start, von: von }, 'Nachgetragen');
-    });
+    const rightBox = document.createElement('div');
+    Object.assign(rightBox.style, { display: 'flex', gap: '6px' });
+    const b1 = makeBtn('pünktlich', function(){ hwHakenAction(week, task.aufgabe, nameOf(), 'puenktlich'); });
+    const b2 = makeBtn('verspätet', function(){ hwHakenAction(week, task.aufgabe, nameOf(), 'verspaetet'); });
     styleGhostBtn(b1);
     styleGhostBtn(b2);
-    row.appendChild(b1);
-    row.appendChild(b2);
+    rightBox.appendChild(b1);
+    rightBox.appendChild(b2);
+    row.appendChild(rightBox);
     card.appendChild(row);
   }
 
@@ -1808,7 +1898,7 @@ function appendAdminPersonen(root, w){
   (w.teilnehmer || []).forEach(p => {
     const row = document.createElement('div');
     styleStatusRow(row);
-    row.appendChild(mk('span', 'Platz ' + p.platz + ' · ' + p.name + (p.abwesend ? ' · abwesend' : ''), { fontSize: '13px' }));
+    row.appendChild(mk('span', p.name + (p.abwesend ? ' · abwesend' : ''), { fontSize: '14px' }));
     const b = p.abwesend
       ? makeBtn('zurücksetzen', function(){ hwAction('resetputzabwesend', { name: p.name, woche: w.start }, 'Abwesenheit zurückgesetzt'); })
       : makeBtn('abwesend setzen', function(){ hwAction('putzabwesendsetzen', { name: p.name }, 'Als abwesend eingetragen'); });
@@ -1817,88 +1907,215 @@ function appendAdminPersonen(root, w){
     root.appendChild(row);
   });
   if((w.frei || []).length){
-    root.appendChild(mkInfo('Diese Woche ohne feste Aufgabe: ' + w.frei.join(', ')));
+    root.appendChild(mkInfo('Ohne feste Aufgabe: ' + w.frei.join(', ')));
   }
 }
 
-// ---- Hauswart: Personen & Reihenfolge ----
-function appendAdminEditor(root){
-  root.appendChild(mkTitle('Personen & Reihenfolge'));
-  root.appendChild(mkInfo('Wähle aus, wer im Putzplan ist, und lege die Reihenfolge fest. Änderungen gelten ab der nächsten Putzwoche (Mittwoch).'));
-  const box = document.createElement('div');
-  box.id = 'hwEditorBox';
-  root.appendChild(box);
-  renderHwEditor();
+// ---- Hauswart: Personen und Aufgaben für die nächste Woche ----
+function hwCount(){
+  return hwPersonen.filter(p => p.eingeplant).length;
+}
 
-  root.appendChild(mkTitle('Aufgaben (im Google Sheet gepflegt)'));
-  const nEin = hwPersonen.filter(p => p.eingeplant).length;
-  ((hauswartConfig && hauswartConfig.aufgaben) || []).forEach(a => {
-    const warn = (a.platz !== 'alle' && a.platz > nEin) ? '  ⚠ Platz gibt es bei ' + nEin + ' Personen nicht' : '';
-    root.appendChild(mk('div',
-      a.aufgabe + ' – ' + (a.platz === 'alle' ? 'alle' : 'Platz ' + a.platz) + (a.aktiv ? '' : ' (aus)') + warn,
-      { fontSize: '13px', margin: '2px 0' }));
+// Wirksamer Platz einer Aufgabe: 'alle', eine gültige Zahl oder '' (nicht zugeteilt)
+function hwEffPlatz(a){
+  if(!a.aktiv) return '';
+  if(a.platz === 'alle') return 'alle';
+  const n = hwCount();
+  return (a.platz >= 1 && a.platz <= n) ? a.platz : '';
+}
+
+function hwChip(text, active, handler){
+  const b = makeBtn(text, handler);
+  Object.assign(b.style, {
+    margin: '0', padding: '8px 14px', fontSize: '13px', borderRadius: '999px',
+    width: 'auto', flex: '0 0 auto', cursor: 'pointer',
+    border: '1px solid ' + (active ? 'var(--ok, #4caf50)' : 'var(--muted, #888)'),
+    background: active ? 'var(--ok, #4caf50)' : 'transparent',
+    color: active ? '#fff' : 'var(--text, #eee)'
   });
+  return b;
+}
+
+function hwChipRow(){
+  const d = document.createElement('div');
+  Object.assign(d.style, { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' });
+  return d;
+}
+
+function hwMoveEin(name, d){
+  const idx = [];
+  hwPersonen.forEach((p, i) => { if(p.eingeplant) idx.push(i); });
+  const pos = idx.findIndex(i => hwPersonen[i].name === name);
+  const other = pos + d;
+  if(pos < 0 || other < 0 || other >= idx.length) return;
+  const tmp = hwPersonen[idx[pos]];
+  hwPersonen[idx[pos]] = hwPersonen[idx[other]];
+  hwPersonen[idx[other]] = tmp;
+  hwDirty = true;
+  renderHwEditor();
+}
+
+function hwSetEingeplant(name, an){
+  const p = hwPersonen.find(x => x.name === name);
+  if(!p) return;
+  p.eingeplant = an;
+  if(an){
+    // ans Ende der eingeplanten Personen setzen
+    hwPersonen = hwPersonen.filter(x => x !== p);
+    let last = -1;
+    hwPersonen.forEach((x, i) => { if(x.eingeplant) last = i; });
+    hwPersonen.splice(last + 1, 0, p);
+  }
+  hwDirty = true;
+  renderHwEditor();
+}
+
+function hwToggleAssign(a, key){
+  if(hwEffPlatz(a) === key){
+    a.aktiv = false;
+  } else {
+    a.platz = key;
+    a.aktiv = true;
+  }
+  hwDirty = true;
+  renderHwEditor();
+}
+
+function hwAddAufgabe(name){
+  const n = String(name || '').trim();
+  if(!n){ toast('Bitte einen Namen eingeben.'); return; }
+  if(hwAufgaben.some(a => sameNameJs(a.aufgabe, n))){ toast('Diese Aufgabe gibt es schon.'); return; }
+  hwAufgaben.push({ aufgabe: n, platz: 'alle', aktiv: false });
+  hwDirty = true;
+  renderHwEditor();
+}
+
+function hwDeleteAufgabe(a){
+  if(!confirm('Aufgabe "' + a.aufgabe + '" löschen?')) return;
+  hwAufgaben = hwAufgaben.filter(x => x !== a);
+  hwDirty = true;
+  renderHwEditor();
 }
 
 function renderHwEditor(){
   const box = document.getElementById('hwEditorBox');
   if(!box) return;
   box.innerHTML = '';
-  let pos = 0;
-  hwPersonen.forEach((p, i) => {
+
+  const ein = hwPersonen.filter(p => p.eingeplant);
+  const aus = hwPersonen.filter(p => !p.eingeplant);
+
+  // 1) Personen
+  box.appendChild(mkTitle('Im Putzplan'));
+  if(!ein.length) box.appendChild(mkInfo('Noch niemand eingeplant.'));
+  ein.forEach(p => {
     const row = document.createElement('div');
     styleStatusRow(row);
-
-    const left = mk('label', null, { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' });
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !!p.eingeplant;
-    cb.addEventListener('change', function(){ p.eingeplant = cb.checked; renderHwEditor(); });
-    left.appendChild(cb);
-    if(p.eingeplant) pos++;
-    left.appendChild(mk('span', (p.eingeplant ? pos + '. ' : '') + p.name));
-    row.appendChild(left);
-
+    row.appendChild(mk('span', p.name, { fontSize: '14px' }));
     const btns = document.createElement('div');
-    btns.style.display = 'flex';
-    btns.style.gap = '6px';
-    const up = makeBtn('↑', function(){ hwMove(i, -1); });
-    const down = makeBtn('↓', function(){ hwMove(i, 1); });
-    styleGhostBtn(up);
-    styleGhostBtn(down);
-    btns.appendChild(up);
-    btns.appendChild(down);
+    Object.assign(btns.style, { display: 'flex', gap: '6px' });
+    const up = makeBtn('↑', function(){ hwMoveEin(p.name, -1); });
+    const down = makeBtn('↓', function(){ hwMoveEin(p.name, 1); });
+    const rm = makeBtn('entfernen', function(){ hwSetEingeplant(p.name, false); });
+    [up, down, rm].forEach(b => { styleGhostBtn(b); btns.appendChild(b); });
     row.appendChild(btns);
-
     box.appendChild(row);
   });
 
-  const save = makeBtn('Speichern', hwSavePersonen);
-  save.style.marginTop = '10px';
+  box.appendChild(mkTitle('Nicht eingeplant'));
+  if(!aus.length) box.appendChild(mkInfo('Alle sind eingeplant.'));
+  aus.forEach(p => {
+    const row = document.createElement('div');
+    styleStatusRow(row);
+    row.appendChild(mk('span', p.name, { fontSize: '14px', color: 'var(--muted, #aaa)' }));
+    const add = makeBtn('hinzufügen', function(){ hwSetEingeplant(p.name, true); });
+    styleGhostBtn(add);
+    row.appendChild(add);
+    box.appendChild(row);
+  });
+
+  // 2) Aufgaben pro Platz
+  box.appendChild(mkTitle('Aufgaben verteilen'));
+  box.appendChild(mkInfo('Tippe bei einem Platz die Aufgaben an, die dieser Platz übernimmt. Jede Aufgabe gehört zu genau einem Platz oder zu Alle.'));
+
+  const n = ein.length;
+  const targets = [];
+  for(let k = 1; k <= n; k++) targets.push({ key: k, label: 'Platz ' + k });
+  targets.push({ key: 'alle', label: 'Alle' });
+
+  targets.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'event-card';
+    card.appendChild(mk('div', t.label, { fontWeight: '600', fontSize: '14px' }));
+    const chips = hwChipRow();
+    hwAufgaben.forEach(a => {
+      const active = hwEffPlatz(a) === t.key;
+      chips.appendChild(hwChip(a.aufgabe, active, function(){ hwToggleAssign(a, t.key); }));
+    });
+    if(!hwAufgaben.length) chips.appendChild(mk('span', 'Noch keine Aufgaben.', { fontSize: '12px', color: 'var(--muted, #aaa)' }));
+    card.appendChild(chips);
+    box.appendChild(card);
+  });
+
+  const offen = hwAufgaben.filter(a => hwEffPlatz(a) === '');
+  const offenCard = document.createElement('div');
+  offenCard.className = 'event-card';
+  offenCard.appendChild(mk('div', 'Nicht zugeteilt', { fontWeight: '600', fontSize: '14px' }));
+  offenCard.appendChild(mk('div', offen.length ? 'Diese Aufgaben werden nicht geputzt.' : 'Alle Aufgaben sind zugeteilt.', {
+    fontSize: '12px', color: offen.length ? '#e0a030' : 'var(--muted, #aaa)', marginTop: '2px'
+  }));
+  const offenChips = hwChipRow();
+  offen.forEach(a => {
+    offenChips.appendChild(hwChip(a.aufgabe + '  ✕', false, function(){ hwDeleteAufgabe(a); }));
+  });
+  offenCard.appendChild(offenChips);
+  box.appendChild(offenCard);
+
+  // 3) Neue Aufgabe
+  const newRow = document.createElement('div');
+  styleStatusRow(newRow);
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = 'Neue Aufgabe';
+  Object.assign(inp.style, { flex: '1 1 auto', minWidth: '0', margin: '0' });
+  const addBtn = makeBtn('Hinzufügen', function(){ hwAddAufgabe(inp.value); });
+  styleGhostBtn(addBtn);
+  newRow.appendChild(inp);
+  newRow.appendChild(addBtn);
+  box.appendChild(newRow);
+
+  const save = makeBtn('Speichern', hwSavePlan);
+  save.style.marginTop = '14px';
   box.appendChild(save);
+  if(hwDirty) box.appendChild(mkInfo('Ungespeicherte Änderungen'));
 }
 
-function hwMove(i, d){
-  const j = i + d;
-  if(j < 0 || j >= hwPersonen.length) return;
-  const tmp = hwPersonen[i];
-  hwPersonen[i] = hwPersonen[j];
-  hwPersonen[j] = tmp;
-  renderHwEditor();
-}
-
-async function hwSavePersonen(){
-  const list = hwPersonen.map(p => ({ name: p.name, eingeplant: p.eingeplant ? 'ja' : 'nein' }));
-  if(!list.some(p => p.eingeplant === 'ja')){
-    toast('Bitte mindestens eine Person einplanen.');
-    return;
-  }
+async function hwSavePlan(){
+  const n = hwCount();
+  if(!n){ toast('Bitte mindestens eine Person einplanen.'); return; }
   if(!navigator.onLine){ toast('Offline – Speichern braucht eine Verbindung.'); return; }
+
+  const offen = hwAufgaben.filter(a => hwEffPlatz(a) === '');
+  if(offen.length){
+    const namen = offen.map(a => a.aufgabe).join(', ');
+    if(!confirm('Diese Aufgaben sind keinem Platz zugeteilt und werden nicht geputzt: ' + namen + '. Trotzdem speichern?')) return;
+  }
+
+  // Eingeplante Personen zuerst (in ihrer Reihenfolge), danach die übrigen
+  const personen = hwPersonen.filter(p => p.eingeplant).concat(hwPersonen.filter(p => !p.eingeplant))
+    .map(p => ({ name: p.name, eingeplant: p.eingeplant ? 'ja' : 'nein' }));
+
+  const aufgaben = hwAufgaben.map(a => {
+    const eff = hwEffPlatz(a);
+    const platz = eff !== '' ? eff : ((a.platz === 'alle' || a.platz >= 1) ? a.platz : 'alle');
+    return { aufgabe: a.aufgabe, platz: platz, aktiv: eff !== '' ? 'ja' : 'nein' };
+  });
+
   try{
-    const res = await putzApi('saveputzplan', { personen: JSON.stringify(list) });
-    let msg = '✓ Gespeichert – gilt ab nächster Woche';
-    if(res.warnungen && res.warnungen.length) msg = '⚠️ ' + res.warnungen[0];
-    toast(msg);
+    const res = await putzApi('saveputzplan', { personen: JSON.stringify(personen), aufgaben: JSON.stringify(aufgaben) });
+    hwDirty = false;
+    toast(res.warnungen && res.warnungen.length ? '⚠️ ' + res.warnungen[0] : '✓ Gespeichert – gilt ab nächster Woche');
+    loadHauswartPanel();
   }catch(e){
     toast('⚠️ ' + e.message);
   }
