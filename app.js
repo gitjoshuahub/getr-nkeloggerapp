@@ -278,6 +278,10 @@ function renderEventListe(events){
     }) : "";
     const evKey = getEventKey(ev);
     const currentStatus = meineStatusMap[evKey] || null;
+    
+    // Event-Objekt sicher serialisieren (verhindert Syntax-Fehler bei Special Chars)
+    const evJson = JSON.stringify(ev).replace(/"/g, "&quot;");
+    
     card.innerHTML = `
       <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
       <div class="event-meta">
@@ -286,9 +290,9 @@ function renderEventListe(events){
         ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
       </div>
       <div class="event-actions" id="evact-${escHtml(evKey)}">
-        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
-        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
-        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'abgesagt', this)">❌ Absage</button>
       </div>
       ${ev.teilnehmer && ev.teilnehmer.length ? '<div class="event-teilnehmer">👥 ' + ev.teilnehmer.map(t=>escHtml(t)).join(', ') + '</div>' : ''}
     `;
@@ -364,6 +368,9 @@ function renderHausEventListe(events){
     }) : "";
     const evKey = getEventKey(ev);
     const currentStatus = meineStatusMap[evKey] || null;
+    
+    const evJson = JSON.stringify(ev).replace(/"/g, "&quot;");
+    
     card.innerHTML = `
       <h3>${escHtml(ev.title || "Ohne Titel")}</h3>
       <div class="event-meta">
@@ -372,9 +379,9 @@ function renderHausEventListe(events){
         ${ev.description ? '<span style="color:var(--muted);font-size:11px;">' + escHtml(ev.description) + '</span>' : ''}
       </div>
       <div class="event-actions" id="evact-haus-${escHtml(evKey)}">
-        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'dabei', this)">✅ Dabei</button>
-        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'vielleicht', this)">❔ Evtl.</button>
-        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(${JSON.stringify(ev)}, 'abgesagt', this)">❌ Absage</button>
+        <button class="${currentStatus==='dabei'?'status-dabei':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'dabei', this)">✅ Dabei</button>
+        <button class="${currentStatus==='vielleicht'?'status-vielleicht':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'vielleicht', this)">❔ Evtl.</button>
+        <button class="${currentStatus==='abgesagt'?'status-abgesagt':''}" onclick="setAttendance(JSON.parse(&quot;${evJson}&quot;), 'abgesagt', this)">❌ Absage</button>
       </div>
     `;
     liste.appendChild(card);
