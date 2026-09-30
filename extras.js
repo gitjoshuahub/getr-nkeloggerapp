@@ -1,9 +1,10 @@
 // ============================================================
 // extras.js  –  Erweiterungen für die Bierlogger-PWA
-//  1) Breite Bildschirme: Kacheln zweispaltig
-//  2) Schnell buchen für den angemeldeten Namen (+ Rangplatz, offener Betrag)
-//  3) Namenslisten alphabetisch
-//  4) Putzplan-Editor: Aufgaben auf mehrere Plätze verteilen
+//  1) Breite Bildschirme: Kacheln von oben nach unten in zwei Spalten
+//  2) Stand-Tab: Abrechnung und Rangliste untereinander (breit: nebeneinander)
+//  3) Schnell buchen für den angemeldeten Namen (+ Rangplatz, offener Betrag)
+//  4) Namenslisten alphabetisch
+//  5) Putzplan-Editor: Aufgaben auf mehrere Plätze verteilen
 // Wird NACH app.js und admin.js geladen. Einbau in index.html:
 //   <script src="extras.js"></script>   (unter <script src="admin.js"></script>)
 // ============================================================
@@ -12,32 +13,67 @@
     return String(a).localeCompare(String(b), 'de', { sensitivity: 'base' });
   };
 
-  // ---------- 1) Breite Bildschirme ----------
+  // ---------- 1) Layout ----------
   const css = `
+/* Stand-Tab: kein Tabwechsel, kein Neu-laden-Knopf (Daten laden beim Öffnen von selbst) */
+#view-stand .subtabbar{ display: none; }
+#view-stand button[onclick^="loadStand"], #view-stand button[onclick^="loadRangliste"]{ display: none; }
+
+/* Kalender: Datum größer */
+.event-card .event-meta{ font-size: 14px; }
+.event-card .event-meta span:first-child{ font-size: 16px; font-weight: 600; color: var(--text); }
+
 @media (min-width: 820px){
   main{ max-width: 1100px; }
   header > *{ max-width: 1100px; margin-left: auto; margin-right: auto; }
-  #bereich-getraenke{ max-width: 480px; margin-left: auto; margin-right: auto; }
-  #kalenderListe, #hausKalenderListe, #meineZusagenListe,
+
+  /* Kacheln laufen von oben nach unten und springen dann in die zweite Spalte.
+     Sie müssen nicht gleich hoch sein, nur der Abstand dazwischen ist gleich. */
+  #view-log, #view-admin, #kalenderListe, #hausKalenderListe, #meineZusagenListe,
   #putzplanRoot, #hauswartRoot, #adminRoot, #hwEditorBox, #admListBox{
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start;
+    column-count: 2; column-gap: 14px;
+  }
+  #view-log > .card, #view-admin > .card, .event-card{
+    break-inside: avoid;
   }
   #kalenderListe > .kal-empty, #hausKalenderListe > .kal-empty, #meineZusagenListe > .kal-empty,
   #putzplanRoot > :not(.event-card), #hauswartRoot > :not(.event-card),
   #adminRoot > :not(.event-card), #hwEditorBox > :not(.event-card), #admListBox > :not(.event-card){
-    grid-column: 1 / -1;
+    column-span: all;
   }
-  #putzplanRoot > button, #hauswartRoot > button, #adminRoot > button,
-  #hwEditorBox > button, #admListBox > button{ justify-self: start; }
-  #kalenderListe .event-card, #hausKalenderListe .event-card, #meineZusagenListe .event-card,
-  #putzplanRoot .event-card, #hauswartRoot .event-card, #adminRoot .event-card,
-  #hwEditorBox .event-card, #admListBox .event-card{ margin-bottom: 0; }
+
+  /* Stand-Tab: Abrechnung und Rangliste nebeneinander */
+  #view-stand{
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start;
+  }
 }`;
   const st = document.createElement('style');
   st.textContent = css;
   document.head.appendChild(st);
 
-  // ---------- 3) Namenslisten alphabetisch ----------
+  // ---------- 2) Stand-Tab: beide Ansichten sichtbar ----------
+  function showBothStand(){
+    const r = document.getElementById('subview-rangliste');
+    const a = document.getElementById('subview-abrechnung');
+    if(r) r.classList.remove('hidden');
+    if(a) a.classList.remove('hidden');
+  }
+
+  window.switchStandTab = function(){
+    showBothStand();
+  };
+
+  // Beim Öffnen des Stand-Tabs Daten im Hintergrund aktualisieren
+  const origSwitchTab = window.switchTab;
+  window.switchTab = function(tab){
+    const r = origSwitchTab.apply(this, arguments);
+    if(tab === 'stand'){
+      try{ loadStand(true); loadRangliste(true); }catch(e){}
+    }
+    return r;
+  };
+
+  // ---------- 4) Namenslisten alphabetisch ----------
   function sortCfg(){
     try{
       ['haus', 'nonloci'].forEach(k => { if(Array.isArray(cfg[k])) cfg[k].sort(cmpDe); });
@@ -56,7 +92,7 @@
     return origAdminLists.apply(this, arguments);
   };
 
-  // ---------- 2) Schnell buchen + Rangplatz + offener Betrag ----------
+  // ---------- 3) Schnell buchen + Rangplatz + offener Betrag ----------
   function qbName(){
     const s = getSession();
     if(!s) return '';
@@ -107,8 +143,11 @@
     const o = qbOpen(name);
     const rankTxt = (r && r.rank) ? '🏆 Platz ' + r.rank + ' von ' + r.total : '🏆 –';
     const openTxt = (o === null) ? '💶 –' : '💶 Offen: ' + qbEuro(o);
-    info.appendChild(mk('span', rankTxt, { fontSize: '14px' }));
-    info.appendChild(mk('span', openTxt, { fontSize: '14px', color: (o && o > 0) ? '#e0a030' : 'var(--ok, #4caf50)' }));
+    info.appendChild(mk('span', rankTxt, { fontSize: '20px', fontWeight: '700' }));
+    info.appendChild(mk('span', openTxt, {
+      fontSize: '20px', fontWeight: '700',
+      color: (o && o > 0) ? '#e0a030' : 'var(--ok, #4caf50)'
+    }));
   }
 
   async function qbBook(menge, typ){
@@ -142,15 +181,15 @@
     Object.assign(row.style, { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' });
     [['🍺 1', 1, 'flasche'], ['🍺 2', 2, 'flasche'], ['🍺 3', 3, 'flasche'], ['🍻 Kasten', 1, 'kasten']].forEach(b => {
       const btn = makeBtn(b[0], function(){ qbBook(b[1], b[2]); });
-      btn.className = 'btn-accent';
-      Object.assign(btn.style, { padding: '12px 4px', fontSize: '14px' });
+      btn.className = 'btn-outline';
+      Object.assign(btn.style, { padding: '12px 4px', fontSize: '15px' });
       row.appendChild(btn);
     });
     card.appendChild(row);
 
     const info = document.createElement('div');
     info.id = 'quickInfo';
-    Object.assign(info.style, { display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '10px' });
+    Object.assign(info.style, { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', marginTop: '14px' });
     qbFillInfo(info, name);
     card.appendChild(info);
   }
@@ -177,10 +216,10 @@
   const origEnter = window.enterApp;
   window.enterApp = function(session){
     origEnter(session);
-    try{ qbRender(); }catch(e){ console.error('Schnell-buchen fehlgeschlagen', e); }
+    try{ showBothStand(); qbRender(); }catch(e){ console.error('Schnell-buchen fehlgeschlagen', e); }
   };
 
-  // ---------- 4) Putzplan-Editor: mehrere Plätze pro Aufgabe ----------
+  // ---------- 5) Putzplan-Editor: mehrere Plätze pro Aufgabe ----------
   function xPlaetze(a){
     if(Array.isArray(a.plaetze) && a.plaetze.length) return a.plaetze.slice();
     if(a.platz === 'alle') return ['alle'];
@@ -369,5 +408,5 @@
   };
 
   // Falls schon jemand angemeldet ist (app.js läuft vor diesem Script)
-  try{ qbRender(); }catch(e){}
+  try{ showBothStand(); qbRender(); }catch(e){}
 })();
