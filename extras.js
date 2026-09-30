@@ -181,7 +181,7 @@
     Object.assign(row.style, { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' });
     [['🍺 1', 1, 'flasche'], ['🍺 2', 2, 'flasche'], ['🍺 3', 3, 'flasche'], ['🍻 Kasten', 1, 'kasten']].forEach(b => {
       const btn = makeBtn(b[0], function(){ qbBook(b[1], b[2]); });
-      btn.className = 'btn-outline';
+      btn.className = (b[2] === 'kasten') ? 'btn-accent' : 'btn-outline';
       Object.assign(btn.style, { padding: '12px 4px', fontSize: '15px' });
       row.appendChild(btn);
     });
