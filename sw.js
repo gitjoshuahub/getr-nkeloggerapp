@@ -1,9 +1,10 @@
 // Bei jedem Deploy hochzaehlen -> zwingt alle Geraete zum Neuladen der App-Shell.
-const CACHE_NAME = "bierlogger-v7";
+const CACHE_NAME = "bierlogger-v8";
 const ASSETS = [
   "./",
   "./index.html",
   "./app.js",
+  "./unteraufgaben.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
